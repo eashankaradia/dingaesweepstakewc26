@@ -16,7 +16,6 @@ const TEAM_ALIASES = {
   Qatar: "QAT",
   "Bosnia and Herzegovina": "BIH",
   "Bosnia & Herzegovina": "BIH",
-  Bosnia: "BIH",
   Brazil: "BRA",
   Morocco: "MAR",
   Scotland: "SCO",
@@ -64,7 +63,6 @@ const TEAM_ALIASES = {
   Croatia: "CRO",
   Panama: "PAN",
   Ghana: "GHA",
-  Ghana: "GHA",
 };
 
 function normalize(name) {
@@ -86,6 +84,21 @@ function teamCode(name) {
   );
 
   return found ? found[1] : null;
+}
+
+function getWorldCupDatesSoFar() {
+  const dates = [];
+  const start = new Date("2026-06-11T00:00:00Z");
+  const endOfTournament = new Date("2026-07-19T00:00:00Z");
+  const today = new Date();
+
+  const end = today < endOfTournament ? today : endOfTournament;
+
+  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    dates.push(d.toISOString().slice(0, 10));
+  }
+
+  return dates;
 }
 
 export default async function handler(req, res) {
@@ -111,63 +124,70 @@ export default async function handler(req, res) {
       });
     }
 
-    const apiRes = await fetch(
-      "https://v3.football.api-sports.io/fixtures?date=2026-06-11",
-      {
-        headers: {
-          "x-apisports-key": apiKey,
-        },
-      }
-    );
+    const dates = getWorldCupDatesSoFar();
+    const matches = [];
+    const debug = [];
 
-    if (!apiRes.ok) {
-      return res.status(500).json({
-        error: `API-Football failed with status ${apiRes.status}`,
-        matches: [],
+    for (const date of dates) {
+      const apiRes = await fetch(
+        `https://v3.football.api-sports.io/fixtures?date=${date}`,
+        {
+          headers: {
+            "x-apisports-key": apiKey,
+          },
+        }
+      );
+
+      const data = await apiRes.json();
+      const fixtures = data.response || [];
+
+      debug.push({
+        date,
+        count: fixtures.length,
       });
-    }
 
-    const data = await apiRes.json();
+      for (const m of fixtures) {
+        const status = m.fixture?.status?.short;
 
-    const matches = (data.response || [])
-      .map((m) => {
+        if (!["FT", "AET", "PEN"].includes(status)) continue;
+
         const homeName = m.teams?.home?.name;
         const awayName = m.teams?.away?.name;
 
-        return {
+        const homeCode = teamCode(homeName);
+        const awayCode = teamCode(awayName);
+
+        // Only include World Cup teams from your sweepstake
+        if (!homeCode || !awayCode) continue;
+
+        matches.push({
           id: m.fixture?.id,
           date: m.fixture?.date,
-          status: m.fixture?.status?.short,
-
-          homeName,
-          awayName,
-
-          homeCode: teamCode(homeName),
-          awayCode: teamCode(awayName),
-
-          homeGoals: m.goals?.home,
-          awayGoals: m.goals?.away,
+          status,
 
           league: m.league?.name,
           country: m.league?.country,
-        };
-      })
-      .filter((m) => {
-        return (
-          m.homeCode &&
-          m.awayCode &&
-          typeof m.homeGoals === "number" &&
-          typeof m.awayGoals === "number"
-        );
-      });
+
+          homeName,
+          awayName,
+          homeCode,
+          awayCode,
+
+          homeGoals: m.goals?.home,
+          awayGoals: m.goals?.away,
+        });
+      }
+    }
 
     const response = {
       matches,
       meta: {
-        source: "api-football-direct-results",
+        source: "api-football-whole-world-cup",
         cached: false,
         checkedAt: new Date().toISOString(),
         count: matches.length,
+        datesChecked: dates.length,
+        debug,
       },
     };
 
