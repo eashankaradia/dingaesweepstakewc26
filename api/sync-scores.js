@@ -255,7 +255,7 @@ export default async function handler(req, res) {
       g,
       k: [],
       meta: {
-        source: "api-football",
+        source: "api-football-v2-debug",
         cached: false,
         matchedResults: g.length,
         checkedAt: new Date().toISOString(),
