@@ -161,7 +161,17 @@ export default async function handler(req, res) {
 
       const data = await apiRes.json();
 
-      const fixtures = data.response || [];
+      const fixtures = response.data.response || [];
+
+      if (date === "2026-06-11") {
+  console.log(
+    fixtures.map(f => ({
+      home: f.teams?.home?.name,
+      away: f.teams?.away?.name,
+      status: f.fixture?.status?.short
+    }))
+  );
+}
 
       debug.push({
         date,
