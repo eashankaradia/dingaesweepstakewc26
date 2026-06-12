@@ -63,6 +63,7 @@ const TEAM_ALIASES = {
   Croatia: "CRO",
   Panama: "PAN",
   Ghana: "GHA",
+  Ghana: "GHA",
 };
 
 function normalize(name) {
@@ -78,21 +79,17 @@ function teamCode(name) {
   const direct = TEAM_ALIASES[name];
   if (direct) return direct;
 
-  const cleaned = normalize(name);
   const found = Object.entries(TEAM_ALIASES).find(
-    ([alias]) => normalize(alias) === cleaned
+    ([alias]) => normalize(alias) === normalize(name)
   );
 
   return found ? found[1] : null;
 }
 
-function getWorldCupDatesSoFar() {
+function getWorldCupDates() {
   const dates = [];
   const start = new Date("2026-06-11T00:00:00Z");
-  const endOfTournament = new Date("2026-07-19T00:00:00Z");
-  const today = new Date();
-
-  const end = today < endOfTournament ? today : endOfTournament;
+  const end = new Date("2026-07-19T00:00:00Z");
 
   for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
     dates.push(d.toISOString().slice(0, 10));
@@ -108,10 +105,7 @@ export default async function handler(req, res) {
     if (cachedResponse && now - cachedAt < CACHE_MS) {
       return res.status(200).json({
         ...cachedResponse,
-        meta: {
-          ...cachedResponse.meta,
-          cached: true,
-        },
+        meta: { ...cachedResponse.meta, cached: true },
       });
     }
 
@@ -124,9 +118,8 @@ export default async function handler(req, res) {
       });
     }
 
-    const dates = getWorldCupDatesSoFar();
+    const dates = getWorldCupDates();
     const matches = [];
-    const debug = [];
 
     for (const date of dates) {
       const apiRes = await fetch(
@@ -141,55 +134,49 @@ export default async function handler(req, res) {
       const data = await apiRes.json();
       const fixtures = data.response || [];
 
-      debug.push({
-        date,
-        count: fixtures.length,
-      });
-
       for (const m of fixtures) {
-        const status = m.fixture?.status?.short;
-
         const homeName = m.teams?.home?.name;
         const awayName = m.teams?.away?.name;
 
         const homeCode = teamCode(homeName);
         const awayCode = teamCode(awayName);
 
-        // Only include World Cup teams from your sweepstake
         if (!homeCode || !awayCode) continue;
 
-matches.push({
-  id: m.fixture?.id,
-  date: m.fixture?.date,
-  status,
+        const status = m.fixture?.status?.short;
 
-  league: m.league?.name,
-  country: m.league?.country,
+        matches.push({
+          id: m.fixture?.id,
+          date: m.fixture?.date,
+          status,
 
-  homeName,
-  awayName,
-  homeCode,
-  awayCode,
+          league: m.league?.name,
+          country: m.league?.country,
 
-  homeGoals: m.goals?.home,
-  awayGoals: m.goals?.away,
+          homeName,
+          awayName,
+          homeCode,
+          awayCode,
 
-  isFinished: ["FT", "AET", "PEN"].includes(status),
-  isScheduled: ["NS", "TBD"].includes(status),
-  isLive: ["1H", "HT", "2H", "ET", "P", "LIVE"].includes(status),
-});
+          homeGoals: m.goals?.home,
+          awayGoals: m.goals?.away,
+
+          isFinished: ["FT", "AET", "PEN"].includes(status),
+          isScheduled: ["NS", "TBD"].includes(status),
+          isLive: ["1H", "HT", "2H", "ET", "P", "LIVE"].includes(status),
+        });
       }
     }
+
+    matches.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     const response = {
       matches,
       meta: {
-        source: "api-football-whole-world-cup",
+        source: "api-football-all-world-cup-fixtures",
         cached: false,
         checkedAt: new Date().toISOString(),
         count: matches.length,
-        datesChecked: dates.length,
-        debug,
       },
     };
 
