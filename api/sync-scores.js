@@ -61,6 +61,13 @@ const TEAM_ALIASES = {
   Croatia: "CRO",
   Panama: "PAN",
   Ghana: "GHA",
+  "Korea Republic": "KOR",
+"Republic of Korea": "KOR",
+"South Korea": "KOR",
+"Korea DPR": "KOR",
+
+"Czech Republic": "CZE",
+"Czechia": "CZE",
 };
 
 const GROUP_FIXTURES = [
@@ -159,6 +166,12 @@ export default async function handler(req, res) {
       debug.push({
         date,
         count: fixtures.length,
+        sample: fixtures.slice(0, 20).map(f => ({
+          home: f.teams?.home?.name,
+          away: f.teams?.away?.name,
+          status: f.fixture?.status?.short,
+          goals: f.goals,
+        })),
       });
 
       for (const f of fixtures) {
