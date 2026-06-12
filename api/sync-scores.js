@@ -149,8 +149,6 @@ export default async function handler(req, res) {
       for (const m of fixtures) {
         const status = m.fixture?.status?.short;
 
-        if (!["FT", "AET", "PEN"].includes(status)) continue;
-
         const homeName = m.teams?.home?.name;
         const awayName = m.teams?.away?.name;
 
@@ -160,22 +158,26 @@ export default async function handler(req, res) {
         // Only include World Cup teams from your sweepstake
         if (!homeCode || !awayCode) continue;
 
-        matches.push({
-          id: m.fixture?.id,
-          date: m.fixture?.date,
-          status,
+matches.push({
+  id: m.fixture?.id,
+  date: m.fixture?.date,
+  status,
 
-          league: m.league?.name,
-          country: m.league?.country,
+  league: m.league?.name,
+  country: m.league?.country,
 
-          homeName,
-          awayName,
-          homeCode,
-          awayCode,
+  homeName,
+  awayName,
+  homeCode,
+  awayCode,
 
-          homeGoals: m.goals?.home,
-          awayGoals: m.goals?.away,
-        });
+  homeGoals: m.goals?.home,
+  awayGoals: m.goals?.away,
+
+  isFinished: ["FT", "AET", "PEN"].includes(status),
+  isScheduled: ["NS", "TBD"].includes(status),
+  isLive: ["1H", "HT", "2H", "ET", "P", "LIVE"].includes(status),
+});
       }
     }
 
