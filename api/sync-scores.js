@@ -108,7 +108,10 @@ export default async function handler(req, res) {
 
     const byKey = new Map();
     for (const f of makeBaseFixtures()) {
-      const key = f.homeCode && f.awayCode ? `${f.date.slice(0,10)}|${f.homeCode}|${f.awayCode}` : f.id;
+      const key =
+  f.homeCode && f.awayCode
+    ? [...[f.homeCode, f.awayCode].sort()].join("|")
+    : f.id;
       byKey.set(key, f);
     }
 
@@ -131,8 +134,7 @@ export default async function handler(req, res) {
         if (!homeCode || !awayCode) continue;
 
         const status = m.fixture?.status?.short;
-        const key = `${date}|${homeCode}|${awayCode}`;
-        const reverseKey = `${date}|${awayCode}|${homeCode}`;
+        const key = [...[homeCode, awayCode].sort()].join("|");
 
         const merged = {
           id: m.fixture?.id || key,
@@ -153,9 +155,14 @@ export default async function handler(req, res) {
           source: "api",
         };
 
-        if (byKey.has(key)) byKey.set(key, merged);
-        else if (byKey.has(reverseKey)) byKey.set(reverseKey, merged);
-        else byKey.set(`api-${m.fixture?.id}`, merged);
+        if (byKey.has(key)) {
+          byKey.set(key, {
+            ...byKey.get(key),
+            ...merged,
+          });
+        } else {
+          byKey.set(`api-${m.fixture?.id}`, merged);
+        }
       }
     }
 
