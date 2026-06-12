@@ -1,7 +1,9 @@
 // Vercel Serverless Function: /api/sync-scores.ts
 // Put this file at: api/sync-scores.ts
-// Required Vercel Environment Variable for live API-Football data:
+// Required Vercel Environment Variable:
 // FOOTBALL_API_KEY = your API-Football key
+//
+// This version is API-only. It contains ZERO hardcoded scores/fallbacks.
 
 const WORLD_CUP_LEAGUE_ID = 1;
 const WORLD_CUP_SEASON = 2026;
@@ -11,8 +13,7 @@ const normalizeName = (name = "") =>
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\./g, "")
-    .replace(/'/g, "")
+    .replace(/[.'’]/g, "")
     .replace(/&/g, "and")
     .replace(/-/g, " ")
     .replace(/\busa\b/g, "united states")
@@ -25,15 +26,15 @@ const normalizeName = (name = "") =>
     .replace(/\btürkiye\b/g, "turkey")
     .replace(/\bcote divoire\b/g, "ivory coast")
     .replace(/\bcôte divoire\b/g, "ivory coast")
-    .replace(/\bivory coast\b/g, "ivory coast")
-    .replace(/\bdr congo\b/g, "congo dr")
-    .replace(/\bdemocratic republic of congo\b/g, "congo dr")
-    .replace(/\bbosnia and herz\b/g, "bosnia and herzegovina")
+    .replace(/\bcongo dr\b/g, "dr congo")
+    .replace(/\bdemocratic republic of congo\b/g, "dr congo")
+    .replace(/\bbosnia and herz\.?\b/g, "bosnia and herzegovina")
     .replace(/\bbosnia herzegovina\b/g, "bosnia and herzegovina")
     .replace(/\s+/g, " ")
     .trim();
 
 const parseDate = (shortDate: string) => {
+  // Converts "Jun 11" to "2026-06-11"
   const d = new Date(`${shortDate}, 2026 12:00:00 UTC`);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString().slice(0, 10);
@@ -41,6 +42,18 @@ const parseDate = (shortDate: string) => {
 
 const isFinished = (status: string) =>
   ["FT", "AET", "PEN"].includes(String(status || "").toUpperCase());
+
+const getGoals = (fixture: any) => {
+  const home = fixture?.goals?.home;
+  const away = fixture?.goals?.away;
+  if (!Number.isInteger(home) || !Number.isInteger(away)) return null;
+  return { home, away };
+};
+
+const looksLikeWorldCup = (fixture: any) => {
+  const leagueName = normalizeName(fixture?.league?.name || "");
+  return leagueName.includes("world cup") || leagueName.includes("fifa world cup");
+};
 
 const findGroupMatch = (pendingGroup: any[], apiFixture: any) => {
   const apiHome = normalizeName(apiFixture?.teams?.home?.name);
@@ -57,12 +70,44 @@ const findGroupMatch = (pendingGroup: any[], apiFixture: any) => {
   });
 };
 
-// Provider-lag fallback for already-verified opening matches.
-// This only fills these exact finished fixtures if the live API returns nothing/misses them.
-const VERIFIED_FALLBACK_RESULTS: Record<string, [number, number]> = {
-  g1: [2, 0], // Mexico 2-0 South Africa
-  g2: [2, 1], // South Korea 2-1 Czechia
+const addGroupResult = (g: any[], pendingGroupForDate: any[], fx: any) => {
+  const localGroup = findGroupMatch(pendingGroupForDate, fx);
+  if (!localGroup) return false;
+  if (g.some(([id]) => id === localGroup.id)) return false;
+
+  const goals = getGoals(fx);
+  if (!goals) return false;
+
+  const apiHome = normalizeName(fx?.teams?.home?.name);
+  const localHome = normalizeName(localGroup.homeName);
+  const sameOrder = apiHome === localHome;
+
+  g.push(
+    sameOrder
+      ? [localGroup.id, goals.home, goals.away]
+      : [localGroup.id, goals.away, goals.home]
+  );
+
+  return true;
 };
+
+async function fetchJson(url: string, apiKey: string) {
+  const resp = await fetch(url, {
+    headers: {
+      "x-apisports-key": apiKey,
+    },
+  });
+
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    throw new Error(
+      data?.message || data?.errors || `API-Football request failed: ${resp.status}`
+    );
+  }
+
+  return data;
+}
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
@@ -71,86 +116,111 @@ export default async function handler(req: any, res: any) {
 
   try {
     const apiKey = process.env.FOOTBALL_API_KEY;
-    const pendingGroup = Array.isArray(req.body?.pendingGroup) ? req.body.pendingGroup : [];
-    const pendingKnockout = Array.isArray(req.body?.pendingKnockout) ? req.body.pendingKnockout : [];
 
-    const g: any[] = [];
+    if (!apiKey) {
+      return res.status(500).json({
+        error: "Missing FOOTBALL_API_KEY in Vercel Environment Variables",
+      });
+    }
+
+    const pendingGroup = Array.isArray(req.body?.pendingGroup)
+      ? req.body.pendingGroup
+      : [];
+
+    // Knockout sync is intentionally left empty until knockout teams are known.
+    // Your frontend already lets you pick knockout teams manually.
     const k: any[] = [];
+    const g: any[] = [];
+
+    const dates = [
+      ...new Set(pendingGroup.map((m) => parseDate(m.date)).filter(Boolean)),
+    ];
+
     const debug: any = {
-      datesChecked: [],
-      apiFixturesSeen: 0,
-      apiFinishedSeen: 0,
-      matchedFromApi: 0,
-      matchedFromFallback: 0,
+      mode: "API_ONLY_NO_HARDCODED_SCORES",
+      datesChecked: dates,
+      primaryFixturesSeen: 0,
+      primaryFinishedSeen: 0,
+      broadFixturesSeen: 0,
+      broadFinishedWorldCupSeen: 0,
+      matchedGroupResults: 0,
+      sampleApiFixtures: [],
     };
 
-    if (apiKey) {
-      const dates = [
-        ...new Set(
-          [...pendingGroup, ...pendingKnockout]
-            .map((m) => parseDate(m.date))
-            .filter(Boolean)
-        ),
-      ];
-      debug.datesChecked = dates;
+    for (const date of dates) {
+      const pendingGroupForDate = pendingGroup.filter(
+        (m) => parseDate(m.date) === date
+      );
 
-      for (const date of dates) {
-        const url =
-          `https://v3.football.api-sports.io/fixtures?league=${WORLD_CUP_LEAGUE_ID}` +
-          `&season=${WORLD_CUP_SEASON}&date=${date}`;
+      // First try the precise World Cup query.
+      const primaryUrl =
+        `https://v3.football.api-sports.io/fixtures?league=${WORLD_CUP_LEAGUE_ID}` +
+        `&season=${WORLD_CUP_SEASON}&date=${date}`;
 
-        const apiResp = await fetch(url, {
-          headers: { "x-apisports-key": apiKey },
-        });
+      const primaryData = await fetchJson(primaryUrl, apiKey);
+      const primaryFixtures = Array.isArray(primaryData.response)
+        ? primaryData.response
+        : [];
 
-        const data = await apiResp.json();
+      debug.primaryFixturesSeen += primaryFixtures.length;
 
-        if (!apiResp.ok) {
-          console.error("API-Football error:", data);
-          continue;
+      for (const fx of primaryFixtures) {
+        if (debug.sampleApiFixtures.length < 8) {
+          debug.sampleApiFixtures.push({
+            source: "primary",
+            date,
+            league: fx?.league?.name,
+            status: fx?.fixture?.status?.short,
+            home: fx?.teams?.home?.name,
+            away: fx?.teams?.away?.name,
+            goals: fx?.goals,
+          });
         }
 
-        const fixtures = Array.isArray(data.response) ? data.response : [];
-        debug.apiFixturesSeen += fixtures.length;
+        if (!isFinished(fx?.fixture?.status?.short)) continue;
+        debug.primaryFinishedSeen++;
 
-        for (const fx of fixtures) {
-          const status = fx?.fixture?.status?.short;
-          if (!isFinished(status)) continue;
-          debug.apiFinishedSeen++;
+        if (addGroupResult(g, pendingGroupForDate, fx)) {
+          debug.matchedGroupResults++;
+        }
+      }
 
-          const homeGoals = fx?.goals?.home;
-          const awayGoals = fx?.goals?.away;
-          if (!Number.isInteger(homeGoals) || !Number.isInteger(awayGoals)) continue;
+      // If the precise query returns nothing useful, try a broader date query.
+      // This still uses API data only; it just filters the returned fixtures to World Cup.
+      if (!g.some(([id]) => pendingGroupForDate.some((m) => m.id === id))) {
+        const broadUrl = `https://v3.football.api-sports.io/fixtures?date=${date}`;
+        const broadData = await fetchJson(broadUrl, apiKey);
+        const broadFixtures = Array.isArray(broadData.response)
+          ? broadData.response
+          : [];
 
-          const sameDatePending = pendingGroup.filter((m) => parseDate(m.date) === date);
-          const localGroup = findGroupMatch(sameDatePending, fx);
-          if (!localGroup) continue;
+        debug.broadFixturesSeen += broadFixtures.length;
 
-          const alreadyAdded = g.some(([id]) => id === localGroup.id);
-          if (alreadyAdded) continue;
+        for (const fx of broadFixtures) {
+          if (debug.sampleApiFixtures.length < 8) {
+            debug.sampleApiFixtures.push({
+              source: "broad",
+              date,
+              league: fx?.league?.name,
+              status: fx?.fixture?.status?.short,
+              home: fx?.teams?.home?.name,
+              away: fx?.teams?.away?.name,
+              goals: fx?.goals,
+            });
+          }
 
-          const apiHome = normalizeName(fx.teams.home.name);
-          const localHome = normalizeName(localGroup.homeName);
-          const sameOrder = apiHome === localHome;
+          if (!looksLikeWorldCup(fx)) continue;
+          if (!isFinished(fx?.fixture?.status?.short)) continue;
+          debug.broadFinishedWorldCupSeen++;
 
-          g.push(
-            sameOrder
-              ? [localGroup.id, homeGoals, awayGoals]
-              : [localGroup.id, awayGoals, homeGoals]
-          );
-          debug.matchedFromApi++;
+          if (addGroupResult(g, pendingGroupForDate, fx)) {
+            debug.matchedGroupResults++;
+          }
         }
       }
     }
 
-    // Fallback only for matches we know are finished and only when they are still pending.
-    for (const pending of pendingGroup) {
-      if (!VERIFIED_FALLBACK_RESULTS[pending.id]) continue;
-      if (g.some(([id]) => id === pending.id)) continue;
-      const [h, a] = VERIFIED_FALLBACK_RESULTS[pending.id];
-      g.push([pending.id, h, a]);
-      debug.matchedFromFallback++;
-    }
+    console.log("sync-scores debug", JSON.stringify(debug, null, 2));
 
     return res.status(200).json({
       g,
@@ -159,12 +229,12 @@ export default async function handler(req: any, res: any) {
       message:
         g.length || k.length
           ? undefined
-          : apiKey
-            ? "No new finished World Cup results found"
-            : "No API key found, and no fallback results matched",
+          : "No API-matched finished World Cup results found. Check Vercel function logs for sampleApiFixtures.",
     });
   } catch (err: any) {
     console.error("sync-scores failed:", err);
-    return res.status(500).json({ error: err?.message || "Failed to sync scores" });
+    return res.status(500).json({
+      error: err?.message || "Failed to sync scores from API-Football",
+    });
   }
 }
