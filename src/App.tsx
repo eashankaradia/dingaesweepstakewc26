@@ -17,6 +17,69 @@ const TEAMS = {
   ENG:["England","🏴","L"], CRO:["Croatia","🇭🇷","L"], PAN:["Panama","🇵🇦","L"], GHA:["Ghana","🇬🇭","L"],
 };
 
+const COUNTRY_NAME_FLAGS = {
+  Mexico: "🇲🇽",
+  "South Africa": "🇿🇦",
+  "Korea Republic": "🇰🇷",
+  "Republic of Korea": "🇰🇷",
+  "South Korea": "🇰🇷",
+  Czechia: "🇨🇿",
+  "Czech Republic": "🇨🇿",
+  Canada: "🇨🇦",
+  Switzerland: "🇨🇭",
+  Qatar: "🇶🇦",
+  "Bosnia and Herzegovina": "🇧🇦",
+  "Bosnia & Herzegovina": "🇧🇦",
+  "Bosnia & Herz.": "🇧🇦",
+  Brazil: "🇧🇷",
+  Morocco: "🇲🇦",
+  Scotland: "🏴",
+  Haiti: "🇭🇹",
+  USA: "🇺🇸",
+  "United States": "🇺🇸",
+  "United States of America": "🇺🇸",
+  Australia: "🇦🇺",
+  Paraguay: "🇵🇾",
+  Turkey: "🇹🇷",
+  Türkiye: "🇹🇷",
+  Germany: "🇩🇪",
+  Ecuador: "🇪🇨",
+  "Ivory Coast": "🇨🇮",
+  "Côte d'Ivoire": "🇨🇮",
+  Curacao: "🇨🇼",
+  Curaçao: "🇨🇼",
+  Netherlands: "🇳🇱",
+  Japan: "🇯🇵",
+  Tunisia: "🇹🇳",
+  Sweden: "🇸🇪",
+  Belgium: "🇧🇪",
+  Iran: "🇮🇷",
+  "IR Iran": "🇮🇷",
+  Egypt: "🇪🇬",
+  "New Zealand": "🇳🇿",
+  Spain: "🇪🇸",
+  Uruguay: "🇺🇾",
+  "Saudi Arabia": "🇸🇦",
+  "Cape Verde": "🇨🇻",
+  France: "🇫🇷",
+  Senegal: "🇸🇳",
+  Norway: "🇳🇴",
+  Iraq: "🇮🇶",
+  Argentina: "🇦🇷",
+  Austria: "🇦🇹",
+  Algeria: "🇩🇿",
+  Jordan: "🇯🇴",
+  Portugal: "🇵🇹",
+  Colombia: "🇨🇴",
+  Uzbekistan: "🇺🇿",
+  "DR Congo": "🇨🇩",
+  "Congo DR": "🇨🇩",
+  England: "🏴",
+  Croatia: "🇭🇷",
+  Panama: "🇵🇦",
+  Ghana: "🇬🇭",
+};
+
 const TEAM_IDS = Object.keys(TEAMS);
 const GROUPS = ["A","B","C","D","E","F","G","H","I","J","K","L"];
 const PLAYER_COLORS = ["#E8B33B","#6FB8E8","#E0635C","#B08FE0","#7CCB8F","#E889B8"];
@@ -41,6 +104,10 @@ const blankState = () => ({
 
 function flagFor(code, fallback = "🏳️") {
   return TEAMS[code]?.[1] || fallback;
+}
+
+function flagForTeam(code, name, fallback = "🏳️") {
+  return TEAMS[code]?.[1] || COUNTRY_NAME_FLAGS[name] || fallback;
 }
 
 function nameFor(code, fallback) {
@@ -123,8 +190,8 @@ export default function App() {
       setState(s => ({ ...s, apiMatches: matches, lastSync: Date.now() }));
       setSyncMsg(
         matches.length
-          ? `Loaded ${matches.length} finished API fixture(s) ✓`
-          : "Loaded 0 API fixture(s), no finished results yet"
+          ? `Loaded ${matches.length} API fixture(s) ✓`
+          : "Loaded 0 API fixture(s)"
       );
     } catch (err) {
       console.error(err);
@@ -146,8 +213,8 @@ export default function App() {
   };
 
   const ResultRow = ({ m }) => {
-    const homeFlag = flagFor(m.homeCode);
-    const awayFlag = flagFor(m.awayCode);
+    const homeFlag = flagForTeam(m.homeCode, m.homeName);
+    const awayFlag = flagForTeam(m.awayCode, m.awayName);
     return (
       <div className="match">
         <div className="matchmeta">
@@ -208,12 +275,12 @@ export default function App() {
 
       {tab === "results" && (
         <section className="pane">
-          <div className="panehead"><h2>API Results</h2><div className="subtle">{state.apiMatches.length} finished fixtures loaded</div></div>
+          <div className="panehead"><h2>Fixtures & Results</h2><div className="subtle">{state.apiMatches.length} fixtures loaded</div></div>
           <div className="syncbar">
             <button className="syncbtn" onClick={runSync} disabled={syncing}>{syncing ? "Syncing…" : "Update scores"}</button>
             <span className="syncmsg">{syncMsg || (state.lastSync ? "Last check " + new Date(state.lastSync).toLocaleString() : "Tap update to fetch scores")}</span>
           </div>
-          <div className="hintline">The API results below are used directly to calculate the table. If a team says “unmapped”, add its API name to TEAM_ALIASES in api/sync-scores.js.</div>
+          <div className="hintline">Finished API results below are used directly to calculate the table. Future fixtures are shown but not counted yet. If a team says “unmapped”, add its API name to TEAM_ALIASES in api/sync-scores.js.</div>
           {state.apiMatches.length === 0 && <div className="empty">No API results loaded yet.</div>}
           {state.apiMatches.map(m => <ResultRow key={m.id} m={m} />)}
         </section>
