@@ -21,6 +21,61 @@ const TEAMS = {
 const TEAM_IDS = Object.keys(TEAMS);
 const GROUPS = ["A","B","C","D","E","F","G","H","I","J","K","L"];
 
+const API_TEAM_MAP = {
+  "Mexico": "MEX",
+  "South Africa": "RSA",
+  "South Korea": "KOR",
+  "Czechia": "CZE",
+  "Canada": "CAN",
+  "Switzerland": "SUI",
+  "Qatar": "QAT",
+  "Bosnia & Herzegovina": "BIH",
+  "Brazil": "BRA",
+  "Morocco": "MAR",
+  "Scotland": "SCO",
+  "Haiti": "HAI",
+  "United States": "USA",
+  "Australia": "AUS",
+  "Paraguay": "PAR",
+  "Türkiye": "TUR",
+  "Germany": "GER",
+  "Ecuador": "ECU",
+  "Ivory Coast": "CIV",
+  "Curaçao": "CUW",
+  "Netherlands": "NED",
+  "Japan": "JPN",
+  "Tunisia": "TUN",
+  "Sweden": "SWE",
+  "Belgium": "BEL",
+  "Iran": "IRN",
+  "Egypt": "EGY",
+  "New Zealand": "NZL",
+  "Spain": "ESP",
+  "Uruguay": "URU",
+  "Saudi Arabia": "KSA",
+  "Cape Verde": "CPV",
+  "France": "FRA",
+  "Senegal": "SEN",
+  "Norway": "NOR",
+  "Iraq": "IRQ",
+  "Argentina": "ARG",
+  "Austria": "AUT",
+  "Algeria": "ALG",
+  "Jordan": "JOR",
+  "Portugal": "POR",
+  "Colombia": "COL",
+  "Uzbekistan": "UZB",
+  "DR Congo": "COD",
+  "England": "ENG",
+  "Croatia": "CRO",
+  "Panama": "PAN",
+  "Ghana": "GHA"
+};
+
+const apiNameToCode = (name) => {
+  return API_TEAM_MAP[name] || null;
+};
+
 // [date, group, home, away, city]
 const GROUP_FIXTURES = [
   ["Jun 11","A","MEX","RSA","Mexico City"], ["Jun 11","A","KOR","CZE","Guadalajara"],
@@ -130,27 +185,24 @@ export default function App() {
   const didAuto = useRef(false);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setState(s => ({ ...blankState(), ...parsed }));
-      }
-    } catch (e) {
-      console.error("load failed", e);
-    }
-    setLoaded(true);
+    (async () => {
+      try {
+        const res = await window.storage.get(STORE_KEY);
+        if (res && res.value) {
+          const parsed = JSON.parse(res.value);
+          setState(s => ({ ...blankState(), ...parsed }));
+        }
+      } catch (e) { /* nothing saved yet */ }
+      setLoaded(true);
+    })();
   }, []);
 
   useEffect(() => {
     if (!loaded) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      try {
-        localStorage.setItem(STORE_KEY, JSON.stringify(state));
-      } catch (e) {
-        console.error("save failed", e);
-      }
+    saveTimer.current = setTimeout(async () => {
+      try { await window.storage.set(STORE_KEY, JSON.stringify(state)); }
+      catch (e) { console.error("save failed", e); }
     }, 600);
     return () => clearTimeout(saveTimer.current);
   }, [state, loaded]);
@@ -248,120 +300,101 @@ export default function App() {
   };
 
   /* ---- live score sync ---- */
-  const runSync = async (auto) => {
-    if (syncing) return;
+const runSync = async (auto) => {
+  if (syncing) return;
+
+  setSyncing(true);
+  setSyncMsg("Fetching live scores…");
+
+  try {
+    const API_KEY = process.env.REACT_APP_API_FOOTBALL_KEY;
 
     const now = Date.now();
     const past = allMatches.filter(m => dateMs(m) <= now);
 
-    const pendingG = past.filter(m => m.type === "group" && !filled(m, state.results));
-    const pendingK = past.filter(m => {
-      if (m.type !== "ko") return false;
-      const kt = state.koTeams[m.id];
-      return !kt || !kt.h || !kt.a || !filled(m, state.results);
+    const pending = past.filter(m => {
+      const r = state.results[m.id];
+      return !r || r.h === "" || r.a === "";
     });
 
-    if (pendingG.length === 0 && pendingK.length === 0) {
+    if (pending.length === 0) {
       setState(s => ({ ...s, lastSync: now }));
-      setSyncMsg("All played matches are up to date ✓");
+      setSyncMsg("Already up to date ✓");
+      setSyncing(false);
       return;
     }
 
-    setSyncing(true);
-    setSyncMsg("Fetching live scores…");
+    // Example: fetch finished matches from API-Football
+    const res = await fetch(
+      "https://v3.football.api-sports.io/fixtures?status=FT&season=2026",
+      {
+        headers: {
+          "x-apisports-key": API_KEY,
+        },
+      }
+    );
 
-    try {
-      const payload = {
-        pendingGroup: pendingG.map(m => ({
-          id: m.id,
-          date: m.date,
-          homeCode: m.h,
-          awayCode: m.a,
-          homeName: TEAMS[m.h]?.[0],
-          awayName: TEAMS[m.a]?.[0],
-        })),
-        pendingKnockout: pendingK.map(m => ({
-          id: m.id,
-          date: m.date,
-          round: m.round,
-          city: m.city,
-          hint: m.hint,
-        })),
+    const data = await res.json();
+
+    const results = { ...state.results };
+
+    let applied = 0;
+
+    for (const match of data.response || []) {
+      const home = match.teams.home.name;
+      const away = match.teams.away.name;
+
+      const homeGoals = match.goals.home;
+      const awayGoals = match.goals.away;
+
+      // match your internal fixture (VERY IMPORTANT mapping step)
+const homeCode = apiNameToCode(match.teams.home.name);
+const awayCode = apiNameToCode(match.teams.away.name);
+
+if (!homeCode || !awayCode) continue;
+
+const localMatch = allMatches.find(m =>
+  m.h === homeCode && m.a === awayCode
+);
+
+      if (!localMatch) continue;
+
+      const cur = results[localMatch.id];
+      if (cur?.h !== "" && cur?.a !== "") continue;
+
+      results[localMatch.id] = {
+        h: String(homeGoals ?? ""),
+        a: String(awayGoals ?? ""),
+        et: null
       };
 
-      const resp = await fetch("/api/sync-scores", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const parsed = await resp.json();
-
-      if (!resp.ok || parsed.error) {
-        throw new Error(parsed.error || "Score API failed");
-      }
-
-      let applied = 0;
-
-      setState(s => {
-        const results = { ...s.results };
-        const koTeams = { ...s.koTeams };
-
-        (parsed.g || []).forEach(([id, h, a]) => {
-          const m = GROUP_FIXTURES.find(x => x.id === id);
-          if (!m) return;
-
-          const cur = results[id];
-          if (cur && cur.h !== "" && cur.a !== "") return; // never overwrite manual entries
-
-          if (Number.isInteger(h) && Number.isInteger(a) && h >= 0 && a >= 0) {
-            results[id] = { h: String(h), a: String(a), et: null };
-            applied++;
-          }
-        });
-
-        (parsed.k || []).forEach(([id, hT, aT, h, a, et]) => {
-          const m = KO_FIXTURES.find(x => x.id === id);
-          if (!m || !TEAMS[hT] || !TEAMS[aT]) return;
-
-          const slot = koTeams[id] || { h: null, a: null };
-          if (!slot.h && !slot.a) koTeams[id] = { h: hT, a: aT };
-
-          const cur = results[id];
-          if (cur && cur.h !== "" && cur.a !== "") return; // never overwrite manual entries
-
-          if (Number.isInteger(h) && Number.isInteger(a) && h >= 0 && a >= 0) {
-            results[id] = {
-              h: String(h),
-              a: String(a),
-              et: et === "h" || et === "a" ? et : null,
-            };
-            applied++;
-          }
-        });
-
-        return { ...s, results, koTeams, lastSync: Date.now() };
-      });
-
-      setSyncMsg(
-        applied > 0
-          ? "Filled in " + applied + " result" + (applied === 1 ? "" : "s") + " ✓"
-          : (parsed.message || "No new finished matches found")
-      );
-    } catch (e) {
-      console.error("sync failed", e);
-      setSyncMsg(auto ? "Auto-update failed — tap Update scores to retry" : "Couldn't fetch scores — try again shortly");
-    } finally {
-      setSyncing(false);
+      applied++;
     }
-  };
 
-  // Auto-sync once per visit, at most every 6 hours
-  useEffect(() => {
-    if (!loaded || didAuto.current) return;
-    didAuto.current = true;
-    if (Date.now() - (state.lastSync || 0) > 6 * 3600 * 1000) runSync(true);
-  }, [loaded]); // eslint-disable-line
+    setState(s => ({
+      ...s,
+      results,
+      lastSync: Date.now()
+    }));
+
+    setSyncMsg(
+      applied ? `Updated ${applied} match(es) ✓` : "No new results"
+    );
+
+  } catch (err) {
+    console.error(err);
+    setSyncMsg("Sync failed — API unavailable or rate-limited");
+  }
+
+  setSyncing(false);
+};
+
+  // // Auto-sync once per visit, at most every 6 hours
+  // useEffect(() => {
+  //   if (!loaded || didAuto.current) return;
+  //   didAuto.current = true;
+  //   if (Date.now() - (state.lastSync || 0) > 6 * 3600 * 1000) runSync(true);
+  // }, [loaded]); // eslint-disable-line
 
   /* ---- render bits ---- */
   const ownerOf = tid => {
