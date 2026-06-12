@@ -6,95 +6,106 @@ const CACHE_MS = 5 * 60 * 1000;
 const TEAM_ALIASES = {
   Mexico: "MEX",
   "South Africa": "RSA",
+
   "Korea Republic": "KOR",
+  "Republic of Korea": "KOR",
   "South Korea": "KOR",
+  "Korea DPR": "KOR",
+
   Czechia: "CZE",
   "Czech Republic": "CZE",
+
   Canada: "CAN",
   Switzerland: "SUI",
   Qatar: "QAT",
   "Bosnia and Herzegovina": "BIH",
   "Bosnia & Herzegovina": "BIH",
+  Bosnia: "BIH",
+
   Brazil: "BRA",
   Morocco: "MAR",
   Scotland: "SCO",
   Haiti: "HAI",
+
   USA: "USA",
   "United States": "USA",
+  "United States of America": "USA",
+
   Australia: "AUS",
   Paraguay: "PAR",
   Turkey: "TUR",
   Türkiye: "TUR",
+
   Germany: "GER",
   Ecuador: "ECU",
   "Ivory Coast": "CIV",
   "Côte d'Ivoire": "CIV",
   Curacao: "CUW",
   Curaçao: "CUW",
+
   Netherlands: "NED",
   Japan: "JPN",
   Tunisia: "TUN",
   Sweden: "SWE",
+
   Belgium: "BEL",
   Iran: "IRN",
   "IR Iran": "IRN",
   Egypt: "EGY",
   "New Zealand": "NZL",
+
   Spain: "ESP",
   Uruguay: "URU",
   "Saudi Arabia": "KSA",
   "Cape Verde": "CPV",
+
   France: "FRA",
   Senegal: "SEN",
   Norway: "NOR",
   Iraq: "IRQ",
+
   Argentina: "ARG",
   Austria: "AUT",
   Algeria: "ALG",
   Jordan: "JOR",
+
   Portugal: "POR",
   Colombia: "COL",
   Uzbekistan: "UZB",
   "DR Congo": "COD",
   "Congo DR": "COD",
+
   England: "ENG",
   Croatia: "CRO",
   Panama: "PAN",
   Ghana: "GHA",
-  "Korea Republic": "KOR",
-"Republic of Korea": "KOR",
-"South Korea": "KOR",
-"Korea DPR": "KOR",
-
-"Czech Republic": "CZE",
-"Czechia": "CZE",
 };
 
 const GROUP_FIXTURES = [
-  ["g1","Jun 11","MEX","RSA"],
-  ["g2","Jun 11","KOR","CZE"],
-  ["g3","Jun 12","CAN","BIH"],
-  ["g4","Jun 12","USA","PAR"],
-  ["g5","Jun 13","BRA","MAR"],
-  ["g6","Jun 13","AUS","TUR"],
-  ["g7","Jun 13","HAI","SCO"],
-  ["g8","Jun 13","QAT","SUI"],
-  ["g9","Jun 14","GER","CUW"],
-  ["g10","Jun 14","CIV","ECU"],
-  ["g11","Jun 14","NED","JPN"],
-  ["g12","Jun 14","SWE","TUN"],
-  ["g13","Jun 15","ESP","CPV"],
-  ["g14","Jun 15","BEL","EGY"],
-  ["g15","Jun 15","KSA","URU"],
-  ["g16","Jun 15","IRN","NZL"],
-  ["g17","Jun 16","FRA","SEN"],
-  ["g18","Jun 16","IRQ","NOR"],
-  ["g19","Jun 16","ARG","ALG"],
-  ["g20","Jun 16","AUT","JOR"],
-  ["g21","Jun 17","POR","COD"],
-  ["g22","Jun 17","ENG","CRO"],
-  ["g23","Jun 17","GHA","PAN"],
-  ["g24","Jun 17","UZB","COL"]
+  ["g1", "Jun 11", "MEX", "RSA"],
+  ["g2", "Jun 11", "KOR", "CZE"],
+  ["g3", "Jun 12", "CAN", "BIH"],
+  ["g4", "Jun 12", "USA", "PAR"],
+  ["g5", "Jun 13", "BRA", "MAR"],
+  ["g6", "Jun 13", "AUS", "TUR"],
+  ["g7", "Jun 13", "HAI", "SCO"],
+  ["g8", "Jun 13", "QAT", "SUI"],
+  ["g9", "Jun 14", "GER", "CUW"],
+  ["g10", "Jun 14", "CIV", "ECU"],
+  ["g11", "Jun 14", "NED", "JPN"],
+  ["g12", "Jun 14", "SWE", "TUN"],
+  ["g13", "Jun 15", "ESP", "CPV"],
+  ["g14", "Jun 15", "BEL", "EGY"],
+  ["g15", "Jun 15", "KSA", "URU"],
+  ["g16", "Jun 15", "IRN", "NZL"],
+  ["g17", "Jun 16", "FRA", "SEN"],
+  ["g18", "Jun 16", "IRQ", "NOR"],
+  ["g19", "Jun 16", "ARG", "ALG"],
+  ["g20", "Jun 16", "AUT", "JOR"],
+  ["g21", "Jun 17", "POR", "COD"],
+  ["g22", "Jun 17", "ENG", "CRO"],
+  ["g23", "Jun 17", "GHA", "PAN"],
+  ["g24", "Jun 17", "UZB", "COL"],
 ];
 
 function normalize(name) {
@@ -129,7 +140,13 @@ export default async function handler(req, res) {
     const now = Date.now();
 
     if (cachedResponse && now - cachedAt < CACHE_MS) {
-      return res.status(200).json(cachedResponse);
+      return res.status(200).json({
+        ...cachedResponse,
+        meta: {
+          ...cachedResponse.meta,
+          cached: true,
+        },
+      });
     }
 
     const apiKey = process.env.FOOTBALL_API_KEY;
@@ -142,9 +159,10 @@ export default async function handler(req, res) {
       });
     }
 
-    const uniqueDates = [...new Set(GROUP_FIXTURES.map(m => m[1]))];
+    const uniqueDates = [...new Set(GROUP_FIXTURES.map((m) => m[1]))];
 
     const g = [];
+    const unmatchedFinished = [];
     const debug = [];
 
     for (const label of uniqueDates) {
@@ -160,27 +178,17 @@ export default async function handler(req, res) {
       );
 
       const data = await apiRes.json();
-
-      const fixtures = response.data.response || [];
-
-      if (date === "2026-06-11") {
-  console.log(
-    fixtures.map(f => ({
-      home: f.teams?.home?.name,
-      away: f.teams?.away?.name,
-      status: f.fixture?.status?.short
-    }))
-  );
-}
+      const fixtures = data.response || [];
 
       debug.push({
         date,
         count: fixtures.length,
-        sample: fixtures.slice(0, 20).map(f => ({
+        sample: fixtures.slice(0, 50).map((f) => ({
           home: f.teams?.home?.name,
           away: f.teams?.away?.name,
           status: f.fixture?.status?.short,
-          goals: f.goals,
+          homeGoals: f.goals?.home,
+          awayGoals: f.goals?.away,
         })),
       });
 
@@ -191,10 +199,23 @@ export default async function handler(req, res) {
           continue;
         }
 
-        const homeCode = teamCode(f.teams?.home?.name);
-        const awayCode = teamCode(f.teams?.away?.name);
+        const homeName = f.teams?.home?.name;
+        const awayName = f.teams?.away?.name;
+
+        const homeCode = teamCode(homeName);
+        const awayCode = teamCode(awayName);
 
         if (!homeCode || !awayCode) {
+          unmatchedFinished.push({
+            reason: "unmapped team name",
+            date,
+            home: homeName,
+            away: awayName,
+            homeCode,
+            awayCode,
+            status,
+            goals: f.goals,
+          });
           continue;
         }
 
@@ -206,16 +227,27 @@ export default async function handler(req, res) {
         );
 
         if (!local) {
+          unmatchedFinished.push({
+            reason: "mapped teams but no local fixture match",
+            date,
+            home: homeName,
+            away: awayName,
+            homeCode,
+            awayCode,
+            status,
+            goals: f.goals,
+          });
           continue;
         }
 
         const [id] = local;
 
-        g.push([
-          id,
-          f.goals.home ?? 0,
-          f.goals.away ?? 0
-        ]);
+        if (
+          typeof f.goals?.home === "number" &&
+          typeof f.goals?.away === "number"
+        ) {
+          g.push([id, f.goals.home, f.goals.away]);
+        }
       }
     }
 
@@ -224,24 +256,25 @@ export default async function handler(req, res) {
       k: [],
       meta: {
         source: "api-football",
+        cached: false,
         matchedResults: g.length,
         checkedAt: new Date().toISOString(),
-        debug
-      }
+        unmatchedFinished,
+        debug,
+      },
     };
 
     cachedResponse = response;
     cachedAt = now;
 
     return res.status(200).json(response);
-
   } catch (err) {
-    console.error(err);
+    console.error("sync-scores failed", err);
 
     return res.status(500).json({
       error: err.message || "sync failed",
       g: [],
-      k: []
+      k: [],
     });
   }
 }
