@@ -147,20 +147,29 @@ export default function App() {
   };
 
   const board = useMemo(() => {
-    const rows = state.players.map(p => ({ ...p, pts: 0, w: 0, d: 0, l: 0, gp: 0, teams: {} }));
+    const rows = state.players.map(p => ({ ...p, pts: 0, w: 0, d: 0, l: 0, gp: 0, gf: 0, ga: 0, gd: 0, teams: {} }));
     const byId = Object.fromEntries(rows.map(r => [r.id, r]));
 
     Object.entries(state.ownership).forEach(([tid, pid]) => {
-      if (byId[pid]) byId[pid].teams[tid] = { pts: 0, w: 0, d: 0, l: 0 };
+      if (byId[pid]) byId[pid].teams[tid] = { pts: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0 };
     });
 
-    const credit = (tid, res) => {
+    const credit = (tid, res, goalsFor, goalsAgainst) => {
       const pid = state.ownership[tid];
       const row = byId[pid];
       if (!row) return;
-      if (!row.teams[tid]) row.teams[tid] = { pts: 0, w: 0, d: 0, l: 0 };
+      if (!row.teams[tid]) row.teams[tid] = { pts: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0 };
       const t = row.teams[tid];
+
       row.gp++;
+      row.gf += goalsFor;
+      row.ga += goalsAgainst;
+      row.gd = row.gf - row.ga;
+
+      t.gf += goalsFor;
+      t.ga += goalsAgainst;
+      t.gd = t.gf - t.ga;
+
       if (res === "w") { row.pts += 3; row.w++; t.pts += 3; t.w++; }
       else if (res === "d") { row.pts += 1; row.d++; t.pts += 1; t.d++; }
       else { row.l++; t.l++; }
@@ -169,11 +178,11 @@ export default function App() {
     state.apiMatches.forEach(m => {
       if (!m.homeCode || !m.awayCode) return;
       if (typeof m.homeGoals !== "number" || typeof m.awayGoals !== "number") return;
-      credit(m.homeCode, resultFor(m, "home"));
-      credit(m.awayCode, resultFor(m, "away"));
+      credit(m.homeCode, resultFor(m, "home"), m.homeGoals, m.awayGoals);
+      credit(m.awayCode, resultFor(m, "away"), m.awayGoals, m.homeGoals);
     });
 
-    return rows.sort((a,b) => b.pts - a.pts || b.w - a.w || a.name.localeCompare(b.name));
+    return rows.sort((a,b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name));
   }, [state.players, state.ownership, state.apiMatches]);
 
   const runSync = async () => {
@@ -289,15 +298,15 @@ export default function App() {
         <section className="pane">
           <div className="panehead"><h2>League Table</h2><div className="subtle">Built from API results</div></div>
           <div className="board">
-            <div className="brow bhead"><span>#</span><span>Manager</span><span>GP</span><span>W</span><span>D</span><span>L</span><span>PTS</span></div>
+            <div className="brow bhead"><span>#</span><span>Manager</span><span>GP</span><span>W</span><span>D</span><span>L</span><span>GD</span><span>PTS</span></div>
             {board.map((p, i) => (
               <div key={p.id}>
                 <button className={"brow" + (i === 0 && p.pts > 0 ? " lead" : "")} onClick={() => setExpanded(expanded === p.id ? null : p.id)}>
-                  <span>{i + 1}</span><span><span className="pdot solo" style={{ background: PLAYER_COLORS[p.id] }} />{p.name}{i === 0 && leaderPts > 0 ? " 🏆" : ""}</span><span>{p.gp}</span><span>{p.w}</span><span>{p.d}</span><span>{p.l}</span><b>{p.pts}</b>
+                  <span>{i + 1}</span><span><span className="pdot solo" style={{ background: PLAYER_COLORS[p.id] }} />{p.name}{i === 0 && leaderPts > 0 ? " 🏆" : ""}</span><span>{p.gp}</span><span>{p.w}</span><span>{p.d}</span><span>{p.l}</span><span>{p.gd > 0 ? `+${p.gd}` : p.gd}</span><b>{p.pts}</b>
                 </button>
                 {expanded === p.id && <div className="squad">
                   {Object.entries(p.teams).sort((a,b) => b[1].pts - a[1].pts).map(([tid, t]) => (
-                    <div key={tid} className="squadrow"><span>{TEAMS[tid]?.[1]} {TEAMS[tid]?.[0]}</span><span>{t.w}-{t.d}-{t.l} · <b>{t.pts}</b> pts</span></div>
+                    <div key={tid} className="squadrow"><span>{TEAMS[tid]?.[1]} {TEAMS[tid]?.[0]}</span><span>{t.w}-{t.d}-{t.l} · GD {t.gd > 0 ? `+${t.gd}` : t.gd} · <b>{t.pts}</b> pts</span></div>
                   ))}
                 </div>}
               </div>
@@ -315,5 +324,5 @@ export default function App() {
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;800&family=Inter:wght@400;600;700&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}.app{min-height:100vh;background:#0C1F15;color:#F0EDE2;font-family:Inter,system-ui,sans-serif;font-size:14px;padding-bottom:76px;max-width:560px;margin:0 auto}.hero{padding:26px 18px 18px;border-bottom:1px solid #ffffff14}.eyebrow{font-family:'Saira Condensed';letter-spacing:.22em;font-size:11px;color:#9FBFA8}h1{font-family:'Saira Condensed';font-weight:800;font-size:44px;line-height:.95;margin:6px 0 8px}h1 span{color:#E8B33B}.rules,.subtle,.hintline,.syncmsg,.city{font-size:12px;color:#9FBFA8}.pane{padding:16px 14px}.panehead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}h2{font-family:'Saira Condensed';font-weight:800;font-size:24px;text-transform:uppercase}.lockcard,.match,.board,.namesedit{background:#10271A;border:1px solid #ffffff12;border-radius:10px;padding:10px;margin-bottom:9px}.lockname{font-family:'Saira Condensed';font-size:18px;font-weight:800}.lockrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.lockteam{font-size:11.5px;background:#0C1F15;border:1px solid #ffffff14;border-radius:999px;padding:4px 9px}.pdot.solo{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px}.syncbar{display:flex;gap:10px;align-items:center;margin:2px 0 10px;flex-wrap:wrap}.syncbtn{background:#E8B33B;color:#0C1F15;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer}.syncbtn:disabled{opacity:.55}.matchmeta{display:flex;gap:8px;align-items:center;margin-bottom:7px;flex-wrap:wrap}.grpbadge{font-family:'Saira Condensed';font-size:11px;letter-spacing:.14em;color:#0C1F15;background:#E8B33B;border-radius:4px;padding:2px 6px}.scoreline{display:flex;align-items:center;gap:8px}.teamcell{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.teamcell.r{text-align:right;align-items:flex-end}.tname{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}.owner{font-size:10.5px;display:inline-flex;align-items:center;gap:5px}.owner .dot{width:6px;height:6px;border-radius:50%}.owner.none{color:#5d7a66}.scorebox.readonly{display:flex;align-items:center;gap:6px;font-family:'Saira Condensed';font-weight:800;font-size:24px;color:#E8B33B}.brow{display:grid;grid-template-columns:26px 1fr 34px 28px 28px 28px 52px;align-items:center;width:100%;padding:11px 12px;background:transparent;border:0;border-bottom:1px solid #ffffff0d;color:#F0EDE2;text-align:left}.brow.bhead{font-size:10px;color:#9FBFA8;text-transform:uppercase}.brow.lead{background:linear-gradient(90deg,#E8B33B22,transparent 70%)}.squad{background:#0C1F15;border-bottom:1px solid #ffffff0d;padding:4px 0}.squadrow{display:flex;justify-content:space-between;padding:6px 14px;font-size:12.5px;color:#C8D8CC}.namerow{display:flex;align-items:center;margin:6px 0}.namerow input{flex:1;background:#0C1F15;border:1px solid #ffffff1c;border-radius:7px;color:#F0EDE2;padding:7px 9px}.glabel{font-family:'Saira Condensed';letter-spacing:.18em;font-size:11px;color:#E8B33B;margin-bottom:6px}.empty{text-align:center;color:#9FBFA8;padding:18px}.tabbar{position:fixed;bottom:0;left:0;right:0;max-width:560px;margin:0 auto;display:flex;background:#0A1A11F2;border-top:1px solid #ffffff1a}.tabbar button{flex:1;background:transparent;border:0;color:#9FBFA8;font-family:'Saira Condensed';font-weight:600;letter-spacing:.14em;font-size:14px;text-transform:uppercase;padding:15px 0;cursor:pointer}.tabbar button.on{color:#E8B33B;box-shadow:inset 0 3px 0 #E8B33B}
+*{box-sizing:border-box;margin:0;padding:0}.app{min-height:100vh;background:#0C1F15;color:#F0EDE2;font-family:Inter,system-ui,sans-serif;font-size:14px;padding-bottom:76px;max-width:560px;margin:0 auto}.hero{padding:26px 18px 18px;border-bottom:1px solid #ffffff14}.eyebrow{font-family:'Saira Condensed';letter-spacing:.22em;font-size:11px;color:#9FBFA8}h1{font-family:'Saira Condensed';font-weight:800;font-size:44px;line-height:.95;margin:6px 0 8px}h1 span{color:#E8B33B}.rules,.subtle,.hintline,.syncmsg,.city{font-size:12px;color:#9FBFA8}.pane{padding:16px 14px}.panehead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}h2{font-family:'Saira Condensed';font-weight:800;font-size:24px;text-transform:uppercase}.lockcard,.match,.board,.namesedit{background:#10271A;border:1px solid #ffffff12;border-radius:10px;padding:10px;margin-bottom:9px}.lockname{font-family:'Saira Condensed';font-size:18px;font-weight:800}.lockrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.lockteam{font-size:11.5px;background:#0C1F15;border:1px solid #ffffff14;border-radius:999px;padding:4px 9px}.pdot.solo{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px}.syncbar{display:flex;gap:10px;align-items:center;margin:2px 0 10px;flex-wrap:wrap}.syncbtn{background:#E8B33B;color:#0C1F15;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer}.syncbtn:disabled{opacity:.55}.matchmeta{display:flex;gap:8px;align-items:center;margin-bottom:7px;flex-wrap:wrap}.grpbadge{font-family:'Saira Condensed';font-size:11px;letter-spacing:.14em;color:#0C1F15;background:#E8B33B;border-radius:4px;padding:2px 6px}.scoreline{display:flex;align-items:center;gap:8px}.teamcell{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.teamcell.r{text-align:right;align-items:flex-end}.tname{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}.owner{font-size:10.5px;display:inline-flex;align-items:center;gap:5px}.owner .dot{width:6px;height:6px;border-radius:50%}.owner.none{color:#5d7a66}.scorebox.readonly{display:flex;align-items:center;gap:6px;font-family:'Saira Condensed';font-weight:800;font-size:24px;color:#E8B33B}.brow{display:grid;grid-template-columns:24px 1fr 30px 26px 26px 26px 34px 46px;align-items:center;width:100%;padding:11px 12px;background:transparent;border:0;border-bottom:1px solid #ffffff0d;color:#F0EDE2;text-align:left}.brow.bhead{font-size:10px;color:#9FBFA8;text-transform:uppercase}.brow.lead{background:linear-gradient(90deg,#E8B33B22,transparent 70%)}.squad{background:#0C1F15;border-bottom:1px solid #ffffff0d;padding:4px 0}.squadrow{display:flex;justify-content:space-between;padding:6px 14px;font-size:12.5px;color:#C8D8CC}.namerow{display:flex;align-items:center;margin:6px 0}.namerow input{flex:1;background:#0C1F15;border:1px solid #ffffff1c;border-radius:7px;color:#F0EDE2;padding:7px 9px}.glabel{font-family:'Saira Condensed';letter-spacing:.18em;font-size:11px;color:#E8B33B;margin-bottom:6px}.empty{text-align:center;color:#9FBFA8;padding:18px}.tabbar{position:fixed;bottom:0;left:0;right:0;max-width:560px;margin:0 auto;display:flex;background:#0A1A11F2;border-top:1px solid #ffffff1a}.tabbar button{flex:1;background:transparent;border:0;color:#9FBFA8;font-family:'Saira Condensed';font-weight:600;letter-spacing:.14em;font-size:14px;text-transform:uppercase;padding:15px 0;cursor:pointer}.tabbar button.on{color:#E8B33B;box-shadow:inset 0 3px 0 #E8B33B}
 `;
