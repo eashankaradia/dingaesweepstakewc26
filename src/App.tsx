@@ -377,10 +377,15 @@ const localMatch = allMatches.find(m =>
       lastSync: Date.now()
     }));
 
-    setSyncMsg(
-      applied ? `Updated ${applied} match(es) ✓` : "No new results"
-    );
+const apiReturned = (parsed.g || []).length + (parsed.k || []).length;
 
+setSyncMsg(
+  applied > 0
+    ? `Updated ${applied} match(es) ✓`
+    : apiReturned > 0
+      ? `${apiReturned} result(s) found, but already entered`
+      : "No new finished World Cup results found"
+);
   } catch (err) {
     console.error(err);
     setSyncMsg("Sync failed — API unavailable or rate-limited");
