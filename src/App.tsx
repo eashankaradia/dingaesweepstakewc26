@@ -304,91 +304,79 @@ const runSync = async (auto) => {
   if (syncing) return;
 
   setSyncing(true);
-  setSyncMsg("Fetching live scores…");
+  setSyncMsg("Checking latest scores…");
 
   try {
-    const API_KEY = process.env.REACT_APP_API_FOOTBALL_KEY;
-
-    const now = Date.now();
-    const past = allMatches.filter(m => dateMs(m) <= now);
-
-    const pending = past.filter(m => {
-      const r = state.results[m.id];
-      return !r || r.h === "" || r.a === "";
+    const resp = await fetch("/api/sync-scores", {
+      cache: "no-store",
     });
 
-    if (pending.length === 0) {
-      setState(s => ({ ...s, lastSync: now }));
-      setSyncMsg("Already up to date ✓");
-      setSyncing(false);
-      return;
+    const data = await resp.json();
+
+    if (!resp.ok || data.error) {
+      throw new Error(data.error || "API failed");
     }
-
-    // Example: fetch finished matches from API-Football
-    const res = await fetch(
-      "https://v3.football.api-sports.io/fixtures?status=FT&season=2026",
-      {
-        headers: {
-          "x-apisports-key": API_KEY,
-        },
-      }
-    );
-
-    const data = await res.json();
-
-    const results = { ...state.results };
 
     let applied = 0;
 
-    for (const match of data.response || []) {
-      const home = match.teams.home.name;
-      const away = match.teams.away.name;
+    setState((s) => {
+      const results = { ...s.results };
+      const koTeams = { ...s.koTeams };
 
-      const homeGoals = match.goals.home;
-      const awayGoals = match.goals.away;
+      (data.g || []).forEach(([id, h, a]) => {
+        const cur = results[id];
 
-      // match your internal fixture (VERY IMPORTANT mapping step)
-const homeCode = apiNameToCode(match.teams.home.name);
-const awayCode = apiNameToCode(match.teams.away.name);
+        if (cur && cur.h !== "" && cur.a !== "") return;
 
-if (!homeCode || !awayCode) continue;
+        results[id] = {
+          h: String(h),
+          a: String(a),
+          et: null,
+        };
 
-const localMatch = allMatches.find(m =>
-  m.h === homeCode && m.a === awayCode
-);
+        applied++;
+      });
 
-      if (!localMatch) continue;
+      (data.k || []).forEach(([id, hT, aT, h, a, et]) => {
+        const slot = koTeams[id] || { h: null, a: null };
 
-      const cur = results[localMatch.id];
-      if (cur?.h !== "" && cur?.a !== "") continue;
+        if (!slot.h && !slot.a) {
+          koTeams[id] = { h: hT, a: aT };
+        }
 
-      results[localMatch.id] = {
-        h: String(homeGoals ?? ""),
-        a: String(awayGoals ?? ""),
-        et: null
+        const cur = results[id];
+
+        if (cur && cur.h !== "" && cur.a !== "") return;
+
+        results[id] = {
+          h: String(h),
+          a: String(a),
+          et: et === "h" || et === "a" ? et : null,
+        };
+
+        applied++;
+      });
+
+      return {
+        ...s,
+        results,
+        koTeams,
+        lastSync: Date.now(),
       };
+    });
 
-      applied++;
-    }
+    const apiReturned = (data.g || []).length + (data.k || []).length;
 
-    setState(s => ({
-      ...s,
-      results,
-      lastSync: Date.now()
-    }));
-
-const apiReturned = (parsed.g || []).length + (parsed.k || []).length;
-
-setSyncMsg(
-  applied > 0
-    ? `Updated ${applied} match(es) ✓`
-    : apiReturned > 0
-      ? `${apiReturned} result(s) found, but already entered`
-      : "No new finished World Cup results found"
-);
+    setSyncMsg(
+      applied > 0
+        ? `Updated ${applied} match(es) ✓`
+        : apiReturned > 0
+          ? `${apiReturned} result(s) found, but already entered`
+          : "No new finished World Cup results found"
+    );
   } catch (err) {
-    console.error(err);
-    setSyncMsg("Sync failed — API unavailable or rate-limited");
+    console.error("sync failed", err);
+    setSyncMsg("Sync failed — check the browser console");
   }
 
   setSyncing(false);
