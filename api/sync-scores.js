@@ -1,9 +1,9 @@
-let cachedResponse: any = null;
+let cachedResponse = null;
 let cachedAt = 0;
 
 const CACHE_MS = 5 * 60 * 1000;
 
-const TEAM_ALIASES: Record<string, string> = {
+const TEAM_ALIASES = {
   Mexico: "MEX",
   "South Africa": "RSA",
   "Korea Republic": "KOR",
@@ -64,33 +64,33 @@ const TEAM_ALIASES: Record<string, string> = {
 };
 
 const GROUP_FIXTURES = [
-  ["g1", "Jun 11", "MEX", "RSA"],
-  ["g2", "Jun 11", "KOR", "CZE"],
-  ["g3", "Jun 12", "CAN", "BIH"],
-  ["g4", "Jun 12", "USA", "PAR"],
-  ["g5", "Jun 13", "BRA", "MAR"],
-  ["g6", "Jun 13", "AUS", "TUR"],
-  ["g7", "Jun 13", "HAI", "SCO"],
-  ["g8", "Jun 13", "QAT", "SUI"],
-  ["g9", "Jun 14", "GER", "CUW"],
-  ["g10", "Jun 14", "CIV", "ECU"],
-  ["g11", "Jun 14", "NED", "JPN"],
-  ["g12", "Jun 14", "SWE", "TUN"],
-  ["g13", "Jun 15", "ESP", "CPV"],
-  ["g14", "Jun 15", "BEL", "EGY"],
-  ["g15", "Jun 15", "KSA", "URU"],
-  ["g16", "Jun 15", "IRN", "NZL"],
-  ["g17", "Jun 16", "FRA", "SEN"],
-  ["g18", "Jun 16", "IRQ", "NOR"],
-  ["g19", "Jun 16", "ARG", "ALG"],
-  ["g20", "Jun 16", "AUT", "JOR"],
-  ["g21", "Jun 17", "POR", "COD"],
-  ["g22", "Jun 17", "ENG", "CRO"],
-  ["g23", "Jun 17", "GHA", "PAN"],
-  ["g24", "Jun 17", "UZB", "COL"],
+  ["g1","Jun 11","MEX","RSA"],
+  ["g2","Jun 11","KOR","CZE"],
+  ["g3","Jun 12","CAN","BIH"],
+  ["g4","Jun 12","USA","PAR"],
+  ["g5","Jun 13","BRA","MAR"],
+  ["g6","Jun 13","AUS","TUR"],
+  ["g7","Jun 13","HAI","SCO"],
+  ["g8","Jun 13","QAT","SUI"],
+  ["g9","Jun 14","GER","CUW"],
+  ["g10","Jun 14","CIV","ECU"],
+  ["g11","Jun 14","NED","JPN"],
+  ["g12","Jun 14","SWE","TUN"],
+  ["g13","Jun 15","ESP","CPV"],
+  ["g14","Jun 15","BEL","EGY"],
+  ["g15","Jun 15","KSA","URU"],
+  ["g16","Jun 15","IRN","NZL"],
+  ["g17","Jun 16","FRA","SEN"],
+  ["g18","Jun 16","IRQ","NOR"],
+  ["g19","Jun 16","ARG","ALG"],
+  ["g20","Jun 16","AUT","JOR"],
+  ["g21","Jun 17","POR","COD"],
+  ["g22","Jun 17","ENG","CRO"],
+  ["g23","Jun 17","GHA","PAN"],
+  ["g24","Jun 17","UZB","COL"]
 ];
 
-function normalize(name: string) {
+function normalize(name) {
   return String(name || "")
     .toLowerCase()
     .replace(/&/g, "and")
@@ -99,11 +99,12 @@ function normalize(name: string) {
     .trim();
 }
 
-function teamCode(name: string) {
+function teamCode(name) {
   const direct = TEAM_ALIASES[name];
   if (direct) return direct;
 
   const cleaned = normalize(name);
+
   const found = Object.entries(TEAM_ALIASES).find(
     ([alias]) => normalize(alias) === cleaned
   );
@@ -111,12 +112,12 @@ function teamCode(name: string) {
   return found ? found[1] : null;
 }
 
-function apiDate(dateLabel: string) {
+function apiDate(dateLabel) {
   const d = new Date(`${dateLabel}, 2026 00:00:00 UTC`);
   return d.toISOString().slice(0, 10);
 }
 
-export default async function handler(req: any, res: any) {
+export default async function handler(req, res) {
   try {
     const now = Date.now();
 
@@ -128,27 +129,28 @@ export default async function handler(req: any, res: any) {
 
     if (!apiKey) {
       return res.status(500).json({
-        error: "Missing FOOTBALL_API_KEY environment variable",
+        error: "Missing FOOTBALL_API_KEY",
         g: [],
         k: [],
       });
     }
 
-    const uniqueDates = [...new Set(GROUP_FIXTURES.map((m) => m[1]))];
+    const uniqueDates = [...new Set(GROUP_FIXTURES.map(m => m[1]))];
 
-    const g: any[] = [];
-    const debug: any[] = [];
+    const g = [];
+    const debug = [];
 
     for (const label of uniqueDates) {
       const date = apiDate(label);
 
-      const url = `https://v3.football.api-sports.io/fixtures?date=${date}`;
-
-      const apiRes = await fetch(url, {
-        headers: {
-          "x-apisports-key": apiKey,
-        },
-      });
+      const apiRes = await fetch(
+        `https://v3.football.api-sports.io/fixtures?date=${date}`,
+        {
+          headers: {
+            "x-apisports-key": apiKey,
+          },
+        }
+      );
 
       const data = await apiRes.json();
 
@@ -157,72 +159,66 @@ export default async function handler(req: any, res: any) {
       debug.push({
         date,
         count: fixtures.length,
-        sample: fixtures.slice(0, 5).map((f: any) => ({
-          home: f.teams?.home?.name,
-          away: f.teams?.away?.name,
-          status: f.fixture?.status?.short,
-          goals: f.goals,
-        })),
       });
 
       for (const f of fixtures) {
         const status = f.fixture?.status?.short;
-        const isFinished = ["FT", "AET", "PEN"].includes(status);
 
-        if (!isFinished) continue;
+        if (!["FT", "AET", "PEN"].includes(status)) {
+          continue;
+        }
 
         const homeCode = teamCode(f.teams?.home?.name);
         const awayCode = teamCode(f.teams?.away?.name);
 
-        if (!homeCode || !awayCode) continue;
+        if (!homeCode || !awayCode) {
+          continue;
+        }
 
         const local = GROUP_FIXTURES.find(
           ([, fixtureDate, h, a]) =>
-            apiDate(fixtureDate) === date && h === homeCode && a === awayCode
+            apiDate(fixtureDate) === date &&
+            h === homeCode &&
+            a === awayCode
         );
 
-        if (!local) continue;
+        if (!local) {
+          continue;
+        }
 
         const [id] = local;
 
-        if (
-          typeof f.goals?.home === "number" &&
-          typeof f.goals?.away === "number"
-        ) {
-          g.push([id, f.goals.home, f.goals.away]);
-        }
+        g.push([
+          id,
+          f.goals.home ?? 0,
+          f.goals.away ?? 0
+        ]);
       }
     }
 
-    const finalResponse = {
+    const response = {
       g,
       k: [],
       meta: {
         source: "api-football",
-        cached: false,
-        checkedAt: new Date().toISOString(),
         matchedResults: g.length,
-        debug,
-      },
+        checkedAt: new Date().toISOString(),
+        debug
+      }
     };
 
-    cachedResponse = {
-      ...finalResponse,
-      meta: {
-        ...finalResponse.meta,
-        cached: true,
-      },
-    };
-    cachedAt = Date.now();
+    cachedResponse = response;
+    cachedAt = now;
 
-    return res.status(200).json(finalResponse);
-  } catch (err: any) {
-    console.error("sync-scores failed", err);
+    return res.status(200).json(response);
+
+  } catch (err) {
+    console.error(err);
 
     return res.status(500).json({
-      error: err?.message || "Sync failed",
+      error: err.message || "sync failed",
       g: [],
-      k: [],
+      k: []
     });
   }
 }
