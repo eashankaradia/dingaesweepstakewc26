@@ -1,8 +1,6 @@
 // Vercel Serverless Function: /api/sync-scores.ts
 // Put this file at: api/sync-scores.ts
-//
-// Required Vercel Environment Variable:
-// FOOTBALL_API_KEY = your API-Football key
+// Required Vercel Environment Variable: FOOTBALL_API_KEY = your API-Football key
 
 const WORLD_CUP_LEAGUE_ID = 1;
 const WORLD_CUP_SEASON = 2026;
@@ -15,18 +13,22 @@ const normalizeName = (name = "") =>
     .replace(/\./g, "")
     .replace(/'/g, "")
     .replace(/&/g, "and")
+    .replace(/\bu\.s\.a\b/g, "united states")
     .replace(/\busa\b/g, "united states")
     .replace(/\bus\b/g, "united states")
-    .replace(/\bu\.s\.\b/g, "united states")
+    .replace(/\bunited states of america\b/g, "united states")
     .replace(/\bturkiye\b/g, "turkey")
-    .replace(/\btürkiye\b/g, "turkey")
+    .replace(/\bturkey\b/g, "turkey")
     .replace(/\bczech republic\b/g, "czechia")
     .replace(/\bcote divoire\b/g, "ivory coast")
     .replace(/\bcôte divoire\b/g, "ivory coast")
-    .replace(/\bdr congo\b/g, "congo dr")
-    .replace(/\bdemocratic republic of congo\b/g, "congo dr")
-    .replace(/\bbosnia & herzegovina\b/g, "bosnia and herzegovina")
-    .replace(/\bbosnia and herz\b/g, "bosnia and herzegovina")
+    .replace(/\bcongo dr\b/g, "dr congo")
+    .replace(/\bdemocratic republic of congo\b/g, "dr congo")
+    .replace(/\bbosnia and herzegovina\b/g, "bosnia herz")
+    .replace(/\bbosnia & herzegovina\b/g, "bosnia herz")
+    .replace(/\bsouth korea\b/g, "korea republic")
+    .replace(/\brepublic of korea\b/g, "korea republic")
+    .replace(/\bsaudi arabia\b/g, "saudi arabia")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -39,6 +41,13 @@ const parseDate = (shortDate: string) => {
 
 const isFinished = (status: string) =>
   ["FT", "AET", "PEN"].includes(String(status || "").toUpperCase());
+
+const fixtureNames = (fx: any) => ({
+  home: fx?.teams?.home?.name || "",
+  away: fx?.teams?.away?.name || "",
+  status: fx?.fixture?.status?.short || "",
+  goals: `${fx?.goals?.home ?? "-"}-${fx?.goals?.away ?? "-"}`,
+});
 
 const findGroupMatch = (pendingGroup: any[], apiFixture: any) => {
   const apiHome = normalizeName(apiFixture?.teams?.home?.name);
@@ -84,6 +93,13 @@ export default async function handler(req: any, res: any) {
 
     const g: any[] = [];
     const k: any[] = [];
+    const debug = {
+      datesChecked: dates,
+      apiFixturesSeen: 0,
+      finishedFixturesSeen: 0,
+      sampleFixtures: [] as any[],
+      unmatchedFinishedFixtures: [] as any[],
+    };
 
     for (const date of dates) {
       const url =
@@ -91,27 +107,31 @@ export default async function handler(req: any, res: any) {
         `&season=${WORLD_CUP_SEASON}&date=${date}`;
 
       const apiResp = await fetch(url, {
-        headers: {
-          "x-apisports-key": apiKey,
-        },
+        headers: { "x-apisports-key": apiKey },
       });
 
       const data = await apiResp.json();
 
-      if (!apiResp.ok) {
+      if (!apiResp.ok || data?.errors?.length || (data?.errors && Object.keys(data.errors).length)) {
         console.error("API-Football error:", data);
-        continue;
+        return res.status(500).json({
+          error: "API-Football returned an error",
+          apiStatus: apiResp.status,
+          apiErrors: data?.errors || data,
+        });
       }
 
       const fixtures = Array.isArray(data.response) ? data.response : [];
+      debug.apiFixturesSeen += fixtures.length;
+      debug.sampleFixtures.push(...fixtures.slice(0, 5).map(fixtureNames));
 
       for (const fx of fixtures) {
         const status = fx?.fixture?.status?.short;
         if (!isFinished(status)) continue;
+        debug.finishedFixturesSeen++;
 
         const homeGoals = fx?.goals?.home;
         const awayGoals = fx?.goals?.away;
-
         if (!Number.isInteger(homeGoals) || !Number.isInteger(awayGoals)) continue;
 
         const localGroup = findGroupMatch(
@@ -129,18 +149,19 @@ export default async function handler(req: any, res: any) {
               ? [localGroup.id, homeGoals, awayGoals]
               : [localGroup.id, awayGoals, homeGoals]
           );
+        } else {
+          debug.unmatchedFinishedFixtures.push(fixtureNames(fx));
         }
-
-        // Knockouts are hard to auto-map before teams are known. This endpoint safely avoids guessing them.
-        // Once knockout teams are manually selected in the app, you can extend this similarly using selected teams.
       }
     }
 
-    return res.status(200).json({
-      g,
-      k,
-      message: g.length || k.length ? undefined : "No new finished World Cup results found",
-    });
+    let message = "No new finished World Cup results found";
+    if (g.length || k.length) message = `Found ${g.length + k.length} result(s)`;
+    else if (debug.apiFixturesSeen === 0) message = `API returned 0 World Cup fixtures for ${dates.join(", ")}`;
+    else if (debug.finishedFixturesSeen === 0) message = `API returned ${debug.apiFixturesSeen} World Cup fixture(s), but none are marked finished yet`;
+    else message = `API returned ${debug.finishedFixturesSeen} finished fixture(s), but none matched your app fixtures`;
+
+    return res.status(200).json({ g, k, message, debug });
   } catch (err: any) {
     console.error("sync-scores failed:", err);
     return res.status(500).json({ error: err?.message || "Failed to sync scores" });
