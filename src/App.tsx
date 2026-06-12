@@ -280,8 +280,7 @@ export default function App() {
             <button className="syncbtn" onClick={runSync} disabled={syncing}>{syncing ? "Syncing…" : "Update scores"}</button>
             <span className="syncmsg">{syncMsg || (state.lastSync ? "Last check " + new Date(state.lastSync).toLocaleString() : "Tap update to fetch scores")}</span>
           </div>
-          <div className="hintline">Finished API results below are used directly to calculate the table. Future fixtures are shown but not counted yet. If a team says “unmapped”, add its API name to TEAM_ALIASES in api/sync-scores.js.</div>
-          {state.apiMatches.length === 0 && <div className="empty">No API results loaded yet.</div>}
+           {state.apiMatches.length === 0 && <div className="empty">No API results loaded yet.</div>}
           {state.apiMatches.map(m => <ResultRow key={m.id} m={m} />)}
         </section>
       )}
