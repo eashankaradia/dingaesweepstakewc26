@@ -245,92 +245,94 @@ export default function App() {
   };
 
   /* ---- live score sync ---- */
-  const runSync = async (auto) => {
-    if (syncing) return;
+const runSync = async (auto) => {
+  if (syncing) return;
+
+  setSyncing(true);
+  setSyncMsg("Fetching live scores…");
+
+  try {
+    const API_KEY = process.env.REACT_APP_API_FOOTBALL_KEY;
+
     const now = Date.now();
     const past = allMatches.filter(m => dateMs(m) <= now);
-    const pendingG = past.filter(m => m.type === "group" && !filled(m, state.results));
-    const pendingK = past.filter(m => {
-      if (m.type !== "ko") return false;
-      const kt = state.koTeams[m.id];
-      return !kt || !kt.h || !kt.a || !filled(m, state.results);
+
+    const pending = past.filter(m => {
+      const r = state.results[m.id];
+      return !r || r.h === "" || r.a === "";
     });
-    if (pendingG.length === 0 && pendingK.length === 0) {
+
+    if (pending.length === 0) {
       setState(s => ({ ...s, lastSync: now }));
-      setSyncMsg("All played matches are up to date");
+      setSyncMsg("Already up to date ✓");
+      setSyncing(false);
       return;
     }
-    setSyncing(true);
-    setSyncMsg("Checking the latest scores…");
-    try {
-      const gList = pendingG.map(m => `${m.id} (${m.date}): ${TEAMS[m.h][0]} [${m.h}] v ${TEAMS[m.a][0]} [${m.a}]`).join("\n");
-      const kList = pendingK.map(m => `${m.id} (${m.date}): ${ROUND_NAMES[m.round]}${m.hint ? " — " + m.hint : ""}${m.city ? " — " + m.city : ""}`).join("\n");
-      const prompt = `Today is ${new Date().toDateString()}. Use web search to find the FINAL results of 2026 FIFA World Cup matches that have already finished. Skip matches not yet played or still in progress.
 
-Team codes: ${TEAM_IDS.map(t => t + "=" + TEAMS[t][0]).join(", ")}
+    // Example: fetch finished matches from API-Football
+    const res = await fetch(
+      "https://v3.football.api-sports.io/fixtures?status=FT&season=2026",
+      {
+        headers: {
+          "x-apisports-key": API_KEY,
+        },
+      }
+    );
 
-Group-stage fixtures needing scores (home v away):
-${gList || "(none)"}
+    const data = await res.json();
 
-Knockout fixtures needing teams and scores:
-${kList || "(none)"}
+    const results = { ...state.results };
 
-Respond with ONLY compact JSON, no markdown fences, no commentary:
-{"g":[["g1",2,0]],"k":[["m73","MEX","KOR",1,1,"h"]]}
-"g" entries: [fixture id, home goals, away goals] in the home/away order listed above.
-"k" entries: [fixture id, home team code, away team code, home goals, away goals, et] where et is "h" or "a" naming the winner if the match was level and decided in extra time or penalties, otherwise null.
-Only include matches whose final result you verified. If none are finished, respond {"g":[],"k":[]}.`;
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-        }),
+    let applied = 0;
+
+    for (const match of data.response || []) {
+      const home = match.teams.home.name;
+      const away = match.teams.away.name;
+
+      const homeGoals = match.goals.home;
+      const awayGoals = match.goals.away;
+
+      // match your internal fixture (VERY IMPORTANT mapping step)
+      const localMatch = allMatches.find(m => {
+        const hName = TEAMS[m.h]?.[0];
+        const aName = TEAMS[m.a]?.[0];
+        return (
+          hName === home &&
+          aName === away
+        );
       });
-      const data = await resp.json();
-      const text = (data.content || []).map(b => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n");
-      const clean = text.replace(/```json|```/g, "");
-      const start = clean.indexOf("{"), end = clean.lastIndexOf("}");
-      if (start === -1 || end === -1) throw new Error("no json in reply");
-      const parsed = JSON.parse(clean.slice(start, end + 1));
-      let applied = 0;
-      setState(s => {
-        const results = { ...s.results };
-        const koTeams = { ...s.koTeams };
-        (parsed.g || []).forEach(([id, h, a]) => {
-          const m = GROUP_FIXTURES.find(x => x.id === id);
-          if (!m) return;
-          const cur = results[id];
-          if (cur && cur.h !== "" && cur.a !== "") return; // never overwrite manual entries
-          if (Number.isInteger(h) && Number.isInteger(a) && h >= 0 && a >= 0) {
-            results[id] = { h: String(h), a: String(a), et: null };
-            applied++;
-          }
-        });
-        (parsed.k || []).forEach(([id, hT, aT, h, a, et]) => {
-          const m = KO_FIXTURES.find(x => x.id === id);
-          if (!m || !TEAMS[hT] || !TEAMS[aT]) return;
-          const slot = koTeams[id] || { h: null, a: null };
-          if (!slot.h && !slot.a) koTeams[id] = { h: hT, a: aT };
-          const cur = results[id];
-          if (cur && cur.h !== "" && cur.a !== "") return;
-          if (Number.isInteger(h) && Number.isInteger(a) && h >= 0 && a >= 0) {
-            results[id] = { h: String(h), a: String(a), et: et === "h" || et === "a" ? et : null };
-            applied++;
-          }
-        });
-        return { ...s, results, koTeams, lastSync: Date.now() };
-      });
-      setSyncMsg(applied > 0 ? "Filled in " + applied + " result" + (applied === 1 ? "" : "s") + " ✓" : "No new finished matches found");
-    } catch (e) {
-      console.error("sync failed", e);
-      setSyncMsg(auto ? "Auto-update couldn't fetch scores — tap Update scores to retry" : "Couldn't fetch scores — try again in a minute");
+
+      if (!localMatch) continue;
+
+      const cur = results[localMatch.id];
+      if (cur?.h !== "" && cur?.a !== "") continue;
+
+      results[localMatch.id] = {
+        h: String(homeGoals ?? ""),
+        a: String(awayGoals ?? ""),
+        et: null
+      };
+
+      applied++;
     }
-    setSyncing(false);
-  };
+
+    setState(s => ({
+      ...s,
+      results,
+      lastSync: Date.now()
+    }));
+
+    setSyncMsg(
+      applied ? `Updated ${applied} match(es) ✓` : "No new results"
+    );
+
+  } catch (err) {
+    console.error(err);
+    setSyncMsg("Sync failed — API unavailable or rate-limited");
+  }
+
+  setSyncing(false);
+};
 
   // Auto-sync once per visit, at most every 6 hours
   useEffect(() => {
