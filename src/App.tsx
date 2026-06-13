@@ -171,6 +171,66 @@ const FIFA_RANKINGS = {
   NZL: 85,
 };
 
+const BASE_WORLD_CUP_WIN_CHANCES = {
+  FRA: 17.00,
+  ESP: 16.10,
+  ENG: 13.00,
+  ARG: 11.50,
+  BRA: 9.50,
+  POR: 8.00,
+  GER: 5.50,
+  NED: 3.50,
+  BEL: 2.50,
+  COL: 2.20,
+  MAR: 1.80,
+  URU: 1.80,
+  USA: 1.50,
+  JPN: 1.30,
+  SUI: 1.20,
+  CRO: 0.90,
+  MEX: 0.60,
+  SEN: 0.50,
+  NOR: 0.50,
+  SWE: 0.30,
+  AUT: 0.30,
+  TUR: 0.30,
+  IRN: 0.20,
+  EGY: 0.20,
+  SCO: 0.20,
+  KOR: 0.20,
+  AUS: 0.20,
+  ECU: 0.20,
+  CIV: 0.20,
+  CAN: 0.10,
+  GHA: 0.10,
+  ALG: 0.10,
+  PAR: 0.10,
+  TUN: 0.05,
+  NZL: 0.05,
+  KSA: 0.05,
+  IRQ: 0.05,
+  JOR: 0.05,
+  BIH: 0.05,
+  UZB: 0.05,
+  PAN: 0.05,
+  QAT: 0.03,
+  CZE: 0.03,
+  COD: 0.03,
+  RSA: 0.02,
+  CPV: 0.02,
+  HAI: 0.01,
+  CUW: 0.01,
+};
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function seededLuckFactor(tid) {
+  const seed = String(tid || "").split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  return 0.95 + ((seed % 101) / 1000);
+}
+
 function fifaRankScore(tid) {
   const rank = FIFA_RANKINGS[tid] || 211;
   return Math.max(1, 212 - rank);
@@ -215,6 +275,11 @@ function percentageText(value) {
   if (!Number.isFinite(value)) return "0.0%";
   if (value > 0 && value < 0.1) return "<0.1%";
   return `${value.toFixed(1)}%`;
+}
+
+function percentageText2(value) {
+  if (!Number.isFinite(value)) return "0.00%";
+  return `${value.toFixed(2)}%`;
 }
 
 const TEAM_IDS = Object.keys(TEAMS);
@@ -609,11 +674,18 @@ export default function App() {
     const rawRows = TEAM_IDS.map((tid) => {
       const t = tournamentData.teamStats[tid];
       const alive = tournamentData.alive.has(tid);
+      const baseChance = BASE_WORLD_CUP_WIN_CHANCES[tid] || 0.01;
+
       if (!alive) {
         return {
           tid,
           raw: 0,
           chance: 0,
+          baseChance,
+          pathPower: 0,
+          pathModifier: 0,
+          performanceModifier: 0,
+          luckModifier: 0,
           avgOpponentRank: null,
           visibleGames: 0,
         };
@@ -637,23 +709,56 @@ export default function App() {
         assumedKnockoutGames,
       );
 
-      const currentFormBoost = Math.max(
-        0.94,
-        Math.min(1.06, 1 + t.pts * 0.006 + t.gd * 0.004),
+      const pathPower = visiblePathProb * genericKnockoutProb;
+      const gamesPlayed = t.gp || 0;
+      const pointsRate = gamesPlayed ? t.pts / (gamesPlayed * 3) : 0.34;
+      const gdRate = gamesPlayed ? t.gd / gamesPlayed : 0;
+      const performanceModifier = clamp(
+        1 + (pointsRate - 0.34) * 0.35 + gdRate * 0.035,
+        0.76,
+        1.28,
       );
+      const luckModifier = seededLuckFactor(tid);
 
       return {
         tid,
-        raw: visiblePathProb * genericKnockoutProb * currentFormBoost,
+        raw: 0,
         chance: 0,
+        baseChance,
+        pathPower,
+        pathModifier: 1,
+        performanceModifier,
+        luckModifier,
         avgOpponentRank: averageOpponentRank,
         visibleGames: visibleMatches.length,
       };
     });
 
-    const total = rawRows.reduce((sum, r) => sum + r.raw, 0) || 1;
+    const alivePathRows = rawRows.filter((r) => r.pathPower > 0);
+    const avgPathPower =
+      alivePathRows.reduce((sum, r) => sum + r.pathPower, 0) /
+        Math.max(1, alivePathRows.length) || 1;
+
+    const weightedRows = rawRows.map((r) => {
+      if (!r.baseChance || r.pathPower <= 0) return r;
+
+      const pathModifier = clamp(r.pathPower / avgPathPower, 0.55, 1.65);
+      const combinedModifier =
+        0.60 +
+        pathModifier * 0.25 +
+        r.performanceModifier * 0.10 +
+        r.luckModifier * 0.05;
+
+      return {
+        ...r,
+        pathModifier,
+        raw: r.baseChance * combinedModifier,
+      };
+    });
+
+    const total = weightedRows.reduce((sum, r) => sum + r.raw, 0) || 1;
     return Object.fromEntries(
-      rawRows.map((r) => [
+      weightedRows.map((r) => [
         r.tid,
         {
           ...r,
@@ -1359,7 +1464,7 @@ export default function App() {
         <div className="charthead">
           <div>
             <div className="glabel">COUNTRY PERFORMANCE</div>
-            <div className="subtle">Country World Cup chances, heavily weighted by FIFA ranking strength and visible upcoming matchups</div>
+            <div className="subtle">Country World Cup chances start from your baseline odds, then adjust for path difficulty, tournament performance and a small luck factor</div>
           </div>
         </div>
         <div className="rankinglist compact performance">
