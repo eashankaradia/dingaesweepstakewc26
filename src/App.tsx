@@ -273,15 +273,13 @@ function matchupWinProbability(teamCode, opponentCode) {
 
 function percentageText(value) {
   if (!Number.isFinite(value)) return "0.0%";
-  const capped = Math.min(99.9, Math.max(0, value));
-  if (capped > 0 && capped < 0.1) return "<0.1%";
-  return `${capped.toFixed(1)}%`;
+  if (value > 0 && value < 0.1) return "<0.1%";
+  return `${value.toFixed(1)}%`;
 }
 
 function percentageText2(value) {
   if (!Number.isFinite(value)) return "0.00%";
-  const capped = Math.min(99.99, Math.max(0, value));
-  return `${capped.toFixed(2)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 const TEAM_IDS = Object.keys(TEAMS);
@@ -716,9 +714,9 @@ export default function App() {
       const pointsRate = gamesPlayed ? t.pts / (gamesPlayed * 3) : 0.34;
       const gdRate = gamesPlayed ? t.gd / gamesPlayed : 0;
       const performanceModifier = clamp(
-        1 + (pointsRate - 0.34) * 0.18 + gdRate * 0.018,
-        0.90,
-        1.10,
+        1 + (pointsRate - 0.34) * 0.35 + gdRate * 0.035,
+        0.76,
+        1.28,
       );
       const luckModifier = seededLuckFactor(tid);
 
@@ -744,9 +742,9 @@ export default function App() {
     const weightedRows = rawRows.map((r) => {
       if (!r.baseChance || r.pathPower <= 0) return r;
 
-      const pathModifier = clamp(r.pathPower / avgPathPower, 0.65, 1.45);
+      const pathModifier = clamp(r.pathPower / avgPathPower, 0.55, 1.65);
       const combinedModifier =
-        1 * 0.60 +
+        0.60 +
         pathModifier * 0.25 +
         r.performanceModifier * 0.10 +
         r.luckModifier * 0.05;
@@ -837,6 +835,101 @@ export default function App() {
           a.name.localeCompare(b.name),
       );
   }, [board, tournamentData.alive, state.apiMatches, state.ownership, teamWorldCupChances]);
+
+
+  const teamValueMovement = useMemo(() => {
+    return TEAM_IDS.map((tid) => {
+      const base = BASE_WORLD_CUP_WIN_CHANCES[tid] || 0.01;
+      const current = teamWorldCupChances[tid]?.chance || 0;
+      const owner = ownerOf(tid);
+      return {
+        tid,
+        base,
+        current,
+        movement: current - base,
+        owner,
+        rank: FIFA_RANKINGS[tid] || 999,
+      };
+    }).sort((a, b) => Math.abs(b.movement) - Math.abs(a.movement) || b.current - a.current);
+  }, [teamWorldCupChances, state.ownership, state.players]);
+
+  const managerPortfolioStrength = useMemo(() => {
+    return board.map((p) => {
+      const teams = Object.keys(p.teams || {});
+      const aliveTeams = teams.filter((tid) => tournamentData.alive.has(tid));
+      const teamChanceTotal = aliveTeams.reduce((sum, tid) => sum + (teamWorldCupChances[tid]?.chance || 0), 0);
+      const avgRank = aliveTeams.length
+        ? Math.round(aliveTeams.reduce((sum, tid) => sum + (FIFA_RANKINGS[tid] || 211), 0) / aliveTeams.length)
+        : null;
+      const bestTeam = aliveTeams
+        .slice()
+        .sort((a, b) => (teamWorldCupChances[b]?.chance || 0) - (teamWorldCupChances[a]?.chance || 0))[0];
+      return { ...p, teamChanceTotal, avgRank, bestTeam };
+    }).sort((a, b) => b.teamChanceTotal - a.teamChanceTotal || b.pts - a.pts);
+  }, [board, tournamentData.alive, teamWorldCupChances]);
+
+  const matchImportanceFor = (m) => {
+    if (!m?.homeCode || !m?.awayCode) {
+      return { score: 0, label: "Low", homeProb: 0, awayProb: 0, drawProb: 0, impacts: [] };
+    }
+
+    const homeStrength = fifaRankScore(m.homeCode);
+    const awayStrength = fifaRankScore(m.awayCode);
+    const totalStrength = Math.max(1, homeStrength + awayStrength);
+    const rawHome = homeStrength / totalStrength;
+    const rawAway = awayStrength / totalStrength;
+    const drawProb = isGroupMatch(m) ? 0.22 : 0.08;
+    const homeProb = rawHome * (1 - drawProb);
+    const awayProb = rawAway * (1 - drawProb);
+    const homeOwnerId = state.ownership[m.homeCode];
+    const awayOwnerId = state.ownership[m.awayCode];
+    const homeOwner = homeOwnerId != null ? state.players.find((p) => p.id === homeOwnerId) : null;
+    const awayOwner = awayOwnerId != null ? state.players.find((p) => p.id === awayOwnerId) : null;
+    const homeTeamChance = teamWorldCupChances[m.homeCode]?.chance || 0;
+    const awayTeamChance = teamWorldCupChances[m.awayCode]?.chance || 0;
+
+    const score =
+      Math.abs(homeProb - awayProb) * 2.5 +
+      (homeTeamChance + awayTeamChance) * 0.55 +
+      (homeOwnerId !== awayOwnerId ? 1.2 : 0.4) +
+      (isLive(m) ? 2 : 0) +
+      (isFinished(m) ? 0 : 0.8);
+
+    const impacts = [];
+    if (homeOwner) {
+      impacts.push({
+        player: homeOwner,
+        team: m.homeCode,
+        expectedPoints: homeProb * 3 + drawProb,
+        teamChance: homeTeamChance,
+      });
+    }
+    if (awayOwner && awayOwner.id !== homeOwner?.id) {
+      impacts.push({
+        player: awayOwner,
+        team: m.awayCode,
+        expectedPoints: awayProb * 3 + drawProb,
+        teamChance: awayTeamChance,
+      });
+    }
+
+    return {
+      score,
+      label: score >= 8 ? "Huge" : score >= 5 ? "High" : score >= 3 ? "Medium" : "Low",
+      homeProb,
+      awayProb,
+      drawProb,
+      impacts: impacts.sort((a, b) => b.expectedPoints - a.expectedPoints),
+    };
+  };
+
+  const matchImportanceRows = useMemo(() => {
+    return state.apiMatches
+      .filter((m) => m.homeCode && m.awayCode && !isFinished(m))
+      .map((m) => ({ ...m, importance: matchImportanceFor(m) }))
+      .sort((a, b) => b.importance.score - a.importance.score || new Date(a.date || 0) - new Date(b.date || 0))
+      .slice(0, 12);
+  }, [state.apiMatches, state.ownership, state.players, teamWorldCupChances]);
 
   const pointsRace = useMemo(() => {
     const finished = state.apiMatches
@@ -1162,6 +1255,7 @@ export default function App() {
     const aScore = typeof m.awayGoals === "number" ? m.awayGoals : "";
     const winnerCode = winningTeamCode(m);
     const winnerOwner = winnerCode ? ownerOf(winnerCode) : null;
+    const importance = matchImportanceFor(m);
     return (
       <div
         className={`match ${winnerOwner ? "managerwin" : ""}`}
@@ -1201,6 +1295,17 @@ export default function App() {
             )}
           </div>
         </div>
+        {m.homeCode && m.awayCode && (
+          <div className="matchimpact">
+            <span className={`impactbadge ${importance.label.toLowerCase()}`}>{importance.label} impact</span>
+            <span>{nameFor(m.homeCode, m.homeName)} {Math.round(importance.homeProb * 100)}% · {nameFor(m.awayCode, m.awayName)} {Math.round(importance.awayProb * 100)}%</span>
+            {importance.impacts.slice(0, 2).map((x) => (
+              <span key={`${m.id}-${x.player.id}`} className="impactpill">
+                <ManagerPill player={x.player} small /> +{x.expectedPoints.toFixed(1)} exp pts
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -1466,13 +1571,12 @@ export default function App() {
         <div className="charthead">
           <div>
             <div className="glabel">COUNTRY PERFORMANCE</div>
-            <div className="subtle">Country World Cup chances start from your baseline odds and adjust mainly for FIFA/path strength, with only a small live performance adjustment</div>
+            <div className="subtle">Country World Cup chances start from your baseline odds, then adjust for path difficulty, tournament performance and a small luck factor</div>
           </div>
         </div>
         <div className="rankinglist compact performance">
           <div className="rankingrow rankinghead countryperfhead">
             <span>Team</span>
-            <span>FIFA</span>
             <span>Pts</span>
             <span>GD</span>
             <span>Chance</span>
@@ -1485,7 +1589,6 @@ export default function App() {
               style={row.owner ? { borderLeftColor: row.owner.color, background: `${row.owner.color}18` } : undefined}
             >
               <span className="rankteam">{TEAMS[row.tid][1]} {TEAMS[row.tid][0]}</span>
-              <span>#{row.rank === 999 ? "—" : row.rank}</span>
               <span>{row.pts}</span>
               <span>{gdText(row.gd)}</span>
               <b>{percentageText(row.chance)}</b>
@@ -1604,7 +1707,8 @@ export default function App() {
         {trophyChances.map((p) => (
           <div
             key={p.id}
-            className={`trophyrow compact managerchance ${p.chance >= 20 ? "chance-high" : p.chance >= 12 ? "chance-mid" : "chance-low"}`}
+            className="trophyrow compact managerchance"
+            style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}
           >
             <ManagerPill player={p} small />
             <div className="trophybar"><i style={{ width: `${Math.max(3, p.chance)}%`, background: PLAYER_COLORS[p.id] }} /></div>
@@ -1721,6 +1825,157 @@ export default function App() {
         <ManagerRivalries playerId={selected.id} />
         <OutcomeDots playerId={selected.id} />
         <OwnershipHeatmap playerId={selected.id} />
+      </section>
+    );
+  };
+
+  const InsightsTab = () => {
+    const topWorldCupTeams = TEAM_IDS
+      .map((tid) => ({
+        tid,
+        chance: teamWorldCupChances[tid]?.chance || 0,
+        base: BASE_WORLD_CUP_WIN_CHANCES[tid] || 0.01,
+        movement: (teamWorldCupChances[tid]?.chance || 0) - (BASE_WORLD_CUP_WIN_CHANCES[tid] || 0.01),
+        owner: ownerOf(tid),
+        rank: FIFA_RANKINGS[tid] || 999,
+      }))
+      .sort((a, b) => b.chance - a.chance)
+      .slice(0, 12);
+
+    const biggestMovers = teamValueMovement.slice(0, 12);
+
+    return (
+      <section className="pane">
+        <div className="panehead">
+          <h2>Insights</h2>
+          <div className="subtle">Impact, movement and projected title race</div>
+        </div>
+
+        <div className="chartbox">
+          <div className="charthead">
+            <div>
+              <div className="glabel">SWEEPSTAKE ODDS</div>
+              <div className="subtle">Manager chance of winning the league</div>
+            </div>
+          </div>
+          <div className="insightgrid compactcards">
+            {trophyChances.map((p) => (
+              <div key={p.id} className="insightcard" style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}>
+                <ManagerPill player={p} small />
+                <b>{percentageText(p.chance)}</b>
+                <span>{p.pts} pts · {p.alive} alive</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="chartbox">
+          <div className="charthead">
+            <div>
+              <div className="glabel">WORLD CUP ODDS</div>
+              <div className="subtle">Country chance of winning the World Cup</div>
+            </div>
+          </div>
+          <div className="rankinglist compact performance">
+            <div className="rankingrow rankinghead countryperfhead insightoddshead">
+              <span>Team</span>
+              <span>Base</span>
+              <span>Now</span>
+              <span>Move</span>
+              <span>Owner</span>
+            </div>
+            {topWorldCupTeams.map((row) => (
+              <div key={row.tid} className="rankingrow countryperfrow insightoddsrow" style={row.owner ? { borderLeftColor: row.owner.color, background: `${row.owner.color}18` } : undefined}>
+                <span className="rankteam">{TEAMS[row.tid][1]} {TEAMS[row.tid][0]}</span>
+                <span>{percentageText(row.base)}</span>
+                <b>{percentageText(row.chance)}</b>
+                <span className={row.movement >= 0 ? "moveup" : "movedown"}>{row.movement >= 0 ? "+" : ""}{percentageText(row.movement)}</span>
+                <span>{row.owner ? <ManagerPill player={row.owner} small /> : "—"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="chartbox">
+          <div className="charthead">
+            <div>
+              <div className="glabel">TEAM VALUE MOVEMENT</div>
+              <div className="subtle">Biggest changes versus starting odds</div>
+            </div>
+          </div>
+          <div className="rankinglist compact performance">
+            <div className="rankingrow rankinghead countryperfhead insightmovehead">
+              <span>Team</span>
+              <span>Start</span>
+              <span>Now</span>
+              <span>Change</span>
+              <span>Owner</span>
+            </div>
+            {biggestMovers.map((row) => (
+              <div key={row.tid} className="rankingrow countryperfrow insightmoverow" style={row.owner ? { borderLeftColor: row.owner.color, background: `${row.owner.color}18` } : undefined}>
+                <span className="rankteam">{TEAMS[row.tid][1]} {TEAMS[row.tid][0]}</span>
+                <span>{percentageText(row.base)}</span>
+                <b>{percentageText(row.current)}</b>
+                <span className={row.movement >= 0 ? "moveup" : "movedown"}>{row.movement >= 0 ? "+" : ""}{percentageText(row.movement)}</span>
+                <span>{row.owner ? <ManagerPill player={row.owner} small /> : "—"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="chartbox">
+          <div className="charthead">
+            <div>
+              <div className="glabel">MATCH IMPORTANCE</div>
+              <div className="subtle">Upcoming games with the biggest expected effect on the sweepstake</div>
+            </div>
+          </div>
+          <div className="importanceList">
+            {matchImportanceRows.length === 0 ? (
+              <div className="empty small">No upcoming fixtures loaded yet.</div>
+            ) : matchImportanceRows.map((m) => (
+              <div key={m.id} className="importanceCard">
+                <div className="importanceTitle">
+                  <b>{flagForTeam(m.homeCode, m.homeName)} {nameFor(m.homeCode, m.homeName)} v {nameFor(m.awayCode, m.awayName)} {flagForTeam(m.awayCode, m.awayName)}</b>
+                  <span className={`impactbadge ${m.importance.label.toLowerCase()}`}>{m.importance.label}</span>
+                </div>
+                <div className="subtle">{m.date ? new Date(m.date).toLocaleString() : "TBC"} · {matchDisplayRound(m)}</div>
+                <div className="importanceImpact">
+                  <span>{nameFor(m.homeCode, m.homeName)} {Math.round(m.importance.homeProb * 100)}%</span>
+                  <span>{nameFor(m.awayCode, m.awayName)} {Math.round(m.importance.awayProb * 100)}%</span>
+                  {m.importance.impacts.map((x) => (
+                    <span key={`${m.id}-${x.player.id}`}><ManagerPill player={x.player} small /> +{x.expectedPoints.toFixed(1)} exp pts</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="chartbox">
+          <div className="charthead">
+            <div>
+              <div className="glabel">MANAGER PORTFOLIO STRENGTH</div>
+              <div className="subtle">Who has the strongest set of surviving countries</div>
+            </div>
+          </div>
+          <div className="rankinglist compact performance">
+            <div className="rankingrow rankinghead managerperfhead">
+              <span>Manager</span>
+              <span>Team odds</span>
+              <span>Avg FIFA</span>
+              <span>Best team</span>
+            </div>
+            {managerPortfolioStrength.map((p) => (
+              <div key={p.id} className="rankingrow managerperfrow" style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}>
+                <span><ManagerPill player={p} small /></span>
+                <b>{percentageText(p.teamChanceTotal)}</b>
+                <span>{p.avgRank ? `#${p.avgRank}` : "—"}</span>
+                <span>{p.bestTeam ? `${TEAMS[p.bestTeam][1]} ${TEAMS[p.bestTeam][0]}` : "—"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
     );
   };
@@ -2058,6 +2313,7 @@ export default function App() {
 
       {tab === "tournament" && <TournamentTab />}
       {tab === "stats" && <StatsTab />}
+      {tab === "insights" && <InsightsTab />}
 
       {showPasswordModal && (
         <div className="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="edit-draft-title">
@@ -2107,6 +2363,7 @@ export default function App() {
           ["table", "Table"],
           ["tournament", "Tournament"],
           ["stats", "My stats"],
+          ["insights", "Insights"],
         ].map(([k, l]) => (
           <button
             key={k}
@@ -2137,21 +2394,8 @@ const CSS = `
 
 /* Final probability and mobile polish */
 .managerpill{border:0!important;min-width:72px;max-width:72px;text-align:center;justify-content:center}.managerpill.small{min-width:58px;max-width:58px}.teamcell .managerpill{min-width:76px;max-width:76px}.trophyrow .managerpill{min-width:58px;max-width:58px}.brow{border-left:4px solid transparent}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:64px minmax(52px,.8fr) 58px 58px}.trophyrow.managerchance{border-left:4px solid transparent}.trophyrow.trophyhead span:nth-child(3),.trophyrow.trophyhead span:nth-child(4){text-align:center}.trophyrow.compact b,.trophyrow.compact>span:last-child{text-align:center}.managerResultPill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 8px;max-width:100%;overflow:hidden;white-space:nowrap}.dotrow{grid-template-columns:1fr}.dotlabel{min-width:0}.managerResultPill .dotsline{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}.rankinglist.performance{display:flex;flex-direction:column;gap:5px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(125px,1fr) 34px 38px 58px 64px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(120px,1fr) 46px 34px 38px 62px}.countryperfrow,.mystatcountryrow{border-left:4px solid transparent}.mystatcountryrow.rag-green{border-left-color:#31c46b;background:#31c46b16}.mystatcountryrow.rag-red{border-left-color:#df5548;background:#df554816}.rankingrow b{color:#E8B33B}.rag-green{border-left-color:#31c46b}.rag-red{border-left-color:#df5548}.managerpill{color:#F0EDE2}@media(max-width:560px){.managerpill{min-width:62px;max-width:62px;font-size:9.5px}.managerpill.small{min-width:52px;max-width:52px}.teamcell .managerpill{min-width:64px;max-width:64px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:56px minmax(44px,.7fr) 52px 50px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(104px,1fr) 28px 32px 52px 54px;font-size:10px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(98px,1fr) 40px 28px 34px 54px;font-size:10px}.managerResultPill{border-radius:999px;align-items:center;flex-direction:row;gap:6px;width:auto;max-width:100%}.managerResultPill .dotsline{gap:3px}}
-/* Final probability and table polish */
-.managerpill{border:0!important;box-shadow:none!important;outline:none!important;}
-.trophyrow .managerpill{min-width:50px!important;max-width:50px!important;padding-left:4px!important;padding-right:4px!important;}
-.teamcell .managerpill{min-width:64px!important;max-width:64px!important;}
-.trophyrow.managerchance{border-left:4px solid transparent;}
-.trophyrow.managerchance.chance-high{border-left-color:#31c46b!important;background:rgba(49,196,107,.12)!important;}
-.trophyrow.managerchance.chance-mid{border-left-color:#e8a23b!important;background:rgba(232,162,59,.12)!important;}
-.trophyrow.managerchance.chance-low{border-left-color:#df5548!important;background:rgba(223,85,72,.12)!important;}
-.countryperfhead,.countryperfrow{grid-template-columns:minmax(118px,1fr) 42px 30px 34px 56px 58px!important;}
-.countryperfrow b{color:#E8B33B;}
-.trophyrow.trophyhead span:nth-child(3),.trophyrow.trophyhead span:nth-child(4){text-align:center;}
-@media(max-width:560px){
-  .trophyrow .managerpill{min-width:46px!important;max-width:46px!important;font-size:9px!important;}
-  .teamcell .managerpill{min-width:58px!important;max-width:58px!important;}
-  .countryperfhead,.countryperfrow{grid-template-columns:minmax(90px,1fr) 34px 26px 30px 46px 46px!important;font-size:9.5px!important;}
-}
+
+/* Insights and impact score additions */
+.matchimpact{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;padding-top:7px;border-top:1px solid #ffffff10;font-size:10.5px;color:#C8D8CC}.impactbadge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 7px;font-size:9.5px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;background:#5d665e;color:#F0EDE2}.impactbadge.huge{background:#E0635C;color:#fff}.impactbadge.high{background:#E8B33B;color:#0C1F15}.impactbadge.medium{background:#e8a23b;color:#0C1F15}.impactbadge.low{background:#5d665e;color:#F0EDE2}.impactpill{display:inline-flex;align-items:center;gap:5px;border:1px solid #ffffff12;border-radius:999px;background:#0C1F15;padding:2px 6px}.insightgrid.compactcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}.insightcard{background:#0C1F15;border:1px solid #ffffff12;border-left:4px solid transparent;border-radius:10px;padding:9px;display:flex;flex-direction:column;gap:5px}.insightcard b{font-family:'Saira Condensed';font-size:24px;color:#E8B33B;line-height:1}.insightcard span{font-size:11px;color:#9FBFA8}.insightoddshead,.insightoddsrow,.insightmovehead,.insightmoverow{grid-template-columns:minmax(120px,1fr) 50px 50px 58px 64px}.managerperfhead,.managerperfrow{grid-template-columns:minmax(96px,.8fr) 70px 58px minmax(120px,1fr)}.moveup{color:#31c46b!important;font-weight:800}.movedown{color:#df5548!important;font-weight:800}.importanceList{display:flex;flex-direction:column;gap:8px}.importanceCard{background:#0C1F15;border:1px solid #ffffff12;border-radius:10px;padding:9px}.importanceTitle{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}.importanceTitle b{font-size:12.5px}.importanceImpact{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.importanceImpact span{display:inline-flex;align-items:center;gap:5px;border:1px solid #ffffff12;border-radius:999px;background:#10271A;padding:4px 7px;font-size:10.5px;color:#C8D8CC}@media(max-width:560px){.matchimpact{gap:4px;font-size:9.5px}.impactpill{padding:2px 4px}.insightoddshead,.insightoddsrow,.insightmovehead,.insightmoverow{grid-template-columns:minmax(98px,1fr) 42px 42px 50px 54px;font-size:10px}.managerperfhead,.managerperfrow{grid-template-columns:58px 58px 46px minmax(88px,1fr);font-size:10px}.insightgrid.compactcards{grid-template-columns:repeat(2,minmax(0,1fr))}.importanceTitle{flex-direction:column;gap:4px}.importanceImpact span{font-size:9.5px;padding:3px 5px}.tabbar button{font-size:9.5px;letter-spacing:.06em}}
 
 `;
