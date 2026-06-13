@@ -338,6 +338,23 @@ function minutesUntil(value) {
   return Math.max(0, Math.ceil((ts - Date.now()) / 60000));
 }
 
+
+function matchDisplayRound(match) {
+  const raw = String(match?.round || match?.league || "World Cup");
+  if (raw === "GROUP_STAGE" || raw.toLowerCase() === "group stage" || raw.toLowerCase().includes("group")) {
+    const g = groupForMatch(match);
+    return g && g !== "KO" ? `Group ${g}` : "Group stage";
+  }
+  return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function winningTeamCode(match) {
+  if (!isFinished(match)) return null;
+  if (typeof match.homeGoals !== "number" || typeof match.awayGoals !== "number") return null;
+  if (match.homeGoals === match.awayGoals) return null;
+  return match.homeGoals > match.awayGoals ? match.homeCode : match.awayCode;
+}
+
 function resultFor(match, side) {
   if (match.homeGoals === match.awayGoals) return "d";
   if (side === "home") return match.homeGoals > match.awayGoals ? "w" : "l";
@@ -929,15 +946,24 @@ export default function App() {
       },
     }));
 
+
+  const ManagerPill = ({ player, pid, children, small = false }) => {
+    const p = player || state.players.find((x) => x.id === Number(pid));
+    if (!p) return <span className="managerpill none">—</span>;
+    return (
+      <span
+        className={`managerpill ${small ? "small" : ""}`}
+        style={{ background: PLAYER_COLORS[p.id] }}
+      >
+        {children || p.name}
+      </span>
+    );
+  };
+
   const OwnerTag = ({ tid }) => {
     const o = ownerOf(tid);
     if (!o) return <span className="owner none">unclaimed</span>;
-    return (
-      <span className="owner" style={{ color: o.color }}>
-        <span className="dot" style={{ background: o.color }} />
-        {o.name}
-      </span>
-    );
+    return <ManagerPill player={o} small />;
   };
 
   const ResultRow = ({ m }) => {
@@ -946,11 +972,16 @@ export default function App() {
     const statusClass = isFinished(m) ? "done" : isLive(m) ? "live" : "future";
     const hScore = typeof m.homeGoals === "number" ? m.homeGoals : "";
     const aScore = typeof m.awayGoals === "number" ? m.awayGoals : "";
+    const winnerCode = winningTeamCode(m);
+    const winnerOwner = winnerCode ? ownerOf(winnerCode) : null;
     return (
-      <div className="match">
+      <div
+        className={`match ${winnerOwner ? "managerwin" : ""}`}
+        style={winnerOwner ? { borderColor: winnerOwner.color, background: `${winnerOwner.color}20` } : undefined}
+      >
         <div className="matchmeta">
           <span className={`grpbadge ${statusClass}`}>{m.status || "NS"}</span>
-          <span className="city">{m.round || m.league || "World Cup"}</span>
+          <span className="city">{matchDisplayRound(m)}</span>
           {m.date && (
             <span className="city">{new Date(m.date).toLocaleString()}</span>
           )}
@@ -1120,13 +1151,7 @@ export default function App() {
             </svg>
             <div className="chartlegend">
               {players.map((p) => (
-                <span key={p.id}>
-                  <span
-                    className="legenddot"
-                    style={{ background: PLAYER_COLORS[p.id] }}
-                  />
-                  {p.name}
-                </span>
+                <span key={p.id}><ManagerPill player={p} small /></span>
               ))}
             </div>
           </>
@@ -1168,7 +1193,7 @@ export default function App() {
                 return <g key={p.id}><polyline points={points} fill="none" stroke={PLAYER_COLORS[p.id]} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /><circle cx={xFor(last.game)} cy={yFor(last.positions[p.id] || players.length)} r="4" fill={PLAYER_COLORS[p.id]} /></g>;
               })}
             </svg>
-            <div className="chartlegend">{players.map((p) => <span key={p.id}><span className="legenddot" style={{ background: PLAYER_COLORS[p.id] }} />{p.name}</span>)}</div>
+            <div className="chartlegend">{players.map((p) => <span key={p.id}><ManagerPill player={p} small /></span>)}</div>
           </>
         )}
       </div>
@@ -1183,7 +1208,7 @@ export default function App() {
         <div className="charthead"><div><div className="glabel">RESULT DOTS</div><div className="subtle">Green win · orange draw · red loss · grey not played</div></div></div>
         <div className="dotsgrid">
           {players.map((p) => (
-            <div key={p.id} className="dotrow"><span className="dotlabel"><span className="pdot solo" style={{ background: PLAYER_COLORS[p.id] }} />{p.name}</span><span className="dotsline">{(outcomeMatrix[p.id] || []).map((o, idx) => <span key={idx} title={`${labelFor[o.result]} — ${nameFor(o.team)}`} className={`outcomedot ${o.result}`} />)}</span></div>
+            <div key={p.id} className="dotrow"><span className="dotlabel"><ManagerPill player={p} /></span><span className="dotsline">{(outcomeMatrix[p.id] || []).map((o, idx) => <span key={idx} title={`${labelFor[o.result]} — ${nameFor(o.team)}`} className={`outcomedot ${o.result}`} />)}</span></div>
           ))}
         </div>
       </div>
@@ -1221,7 +1246,7 @@ export default function App() {
                 <span className="ranknum">{idx + 1}</span>
                 <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
                 <span className="rankfifa">#{FIFA_RANKINGS[tid] || "—"}</span>
-                <span className="rankowner">{owner ? owner.name : "—"}</span>
+                <span className="rankowner">{owner ? <ManagerPill player={owner} small /> : "—"}</span>
               </div>
             );
           })}
@@ -1332,14 +1357,13 @@ export default function App() {
           <span>Manager</span>
           <span>Chance</span>
           <span>Avg FIFA</span>
-          <span>Best</span>
         </div>
         {trophyChances.map((p) => (
           <div key={p.id} className="trophyrow compact">
-            <span><span className="pdot solo" style={{ background: PLAYER_COLORS[p.id] }} />{p.name}</span>
+            <ManagerPill player={p} />
+            <div className="trophybar"><i style={{ width: `${Math.max(3, p.chance)}%`, background: PLAYER_COLORS[p.id] }} /></div>
             <b>{p.chance}%</b>
             <span>{p.avgRank ? `#${p.avgRank}` : "—"}</span>
-            <span>{p.bestRank ? `#${p.bestRank}` : "—"}</span>
           </div>
         ))}
       </div>
@@ -1482,7 +1506,7 @@ export default function App() {
                   <span>
                     {row.flag} {row.name}
                   </span>
-                  <span>{owner ? owner.name : "—"}</span>
+                  <span>{owner ? <ManagerPill player={owner} small /> : "—"}</span>
                   <span>{row.gp}</span>
                   <b>{row.pts}</b>
                   <span>{gdText(row.gd)}</span>
@@ -1550,10 +1574,6 @@ export default function App() {
           {state.players.map((p) => (
             <div key={p.id} className="lockcard">
               <div className="lockname">
-                <span
-                  className="pdot solo"
-                  style={{ background: PLAYER_COLORS[p.id] }}
-                />
                 {editingDraft ? (
                   <input
                     className="draftnameinput"
@@ -1563,7 +1583,7 @@ export default function App() {
                     aria-label={`Edit ${p.name} name`}
                   />
                 ) : (
-                  p.name
+                  <ManagerPill player={p} />
                 )}
               </div>
               <div className="lockrow">
@@ -1620,6 +1640,15 @@ export default function App() {
           <div className="filtercollapse">
             <button className="clearfilterbtn filtertoggle" onClick={() => setFiltersOpen(!filtersOpen)}>
               {filtersOpen ? "Hide filters" : "Show filters"}
+            </button>
+            <button
+              className={`clearfilterbtn todaybtn ${resultDateFilter === localDateKey(new Date()) ? "on" : ""}`}
+              onClick={() => {
+                const today = localDateKey(new Date());
+                setResultDateFilter(resultDateFilter === today ? "" : today);
+              }}
+            >
+              Today
             </button>
             {(resultFilter !== "all" || resultGroupFilter !== "all" || resultDateFilter || resultCountryFilter !== "all") && (
               <button
@@ -1729,12 +1758,7 @@ export default function App() {
                 >
                   <span>{i + 1}</span>
                   <span>
-                    <span
-                      className="pdot solo"
-                      style={{ background: PLAYER_COLORS[p.id] }}
-                    />
-                    {p.name}
-                    {i === 0 && leaderPts > 0 ? " 🏆" : ""}
+                    <ManagerPill player={p}>{`${p.name}${i === 0 && leaderPts > 0 ? " 🏆" : ""}`}</ManagerPill>
                   </span>
                   <span>{p.gp}</span>
                   <span>{p.w}</span>
@@ -1847,5 +1871,8 @@ const CSS = `
 
 /* requested compact updates */
 .teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px}.teamstatcard.compact{display:grid;grid-template-columns:1fr auto;gap:3px 7px;padding:8px;border-left:4px solid #ffffff22}.teamstatcard.compact b{grid-column:1/-1;font-size:12.5px}.teamstatcard.compact span{font-size:11px}.teamstatcard.rag-green{border-left-color:#31c46b;background:rgba(49,196,107,.10)}.teamstatcard.rag-amber{border-left-color:#e8a23b;background:rgba(232,162,59,.10)}.teamstatcard.rag-red{border-left-color:#df5548;background:rgba(223,85,72,.10)}.trophygrid.compact{gap:5px}.trophyrow.compact,.trophyrow.trophyhead{display:grid;grid-template-columns:1fr 58px 66px 50px;gap:8px;align-items:center;padding:7px 8px;border:1px solid #ffffff12;border-radius:8px;background:#0C1F15;font-size:12px}.trophyrow.trophyhead{background:transparent;color:#9FBFA8;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.trophyrow.compact b{font-family:'Saira Condensed';font-size:18px;color:#E8B33B}.grow,.grow.qualrow{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}.grow.ghead{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}@media(max-width:560px){.grow,.grow.qualrow,.grow.ghead{grid-template-columns:1.05fr .72fr 24px 28px 28px 48px;font-size:10.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:1fr 50px 54px 44px;font-size:11px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* mobile cleanup overrides */
+.managerpill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 8px;color:#0C1F15;font-weight:800;font-size:11px;line-height:1.1;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.managerpill.small{font-size:10px;padding:2px 6px}.managerpill.none{background:#5d665e;color:#C8D8CC}.owner .dot,.legenddot{display:none}.match.managerwin{box-shadow:0 0 0 1px #ffffff0d inset}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px 58px}.trophyrow.compact .trophybar{height:8px;min-width:60px}.trophyrow.compact b{font-size:16px;text-align:right}.dotrow{grid-template-columns:auto 1fr;align-items:center}.dotlabel{min-width:82px}.dotsline{align-items:center}.outcomedot{width:9px;height:9px}.teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}.teamstatcard.compact{padding:7px;gap:2px}.teamstatcard.compact b{font-size:12px}.teamstatcard.compact span,.teamstatcard.compact small{font-size:10.5px}.todaybtn.on{background:#E8B33B;color:#0C1F15;border-color:#E8B33B;font-weight:800}.filtercollapse{align-items:stretch}.filtercollapse .clearfilterbtn{min-height:34px}.scoreline{gap:6px}.teamcell{min-width:0}.grpbadge{letter-spacing:.08em}.grow{min-width:0}.grow span{min-width:0;overflow:hidden;text-overflow:ellipsis}.brow span{min-width:0;overflow:hidden;text-overflow:ellipsis}@media(max-width:560px){.pane{padding:12px 10px}.hero{padding:20px 14px 14px}h1{font-size:38px}.panehead{align-items:flex-start}.match,.lockcard,.chartbox,.groupbox,.board{padding:8px;border-radius:9px}.matchmeta{gap:5px}.city{font-size:10.5px}.tname{font-size:12px}.scorebox.readonly{font-size:20px;gap:4px}.brow{grid-template-columns:20px minmax(72px,1fr) 23px 20px 20px 20px 28px 34px 36px;padding:9px 6px;font-size:10.5px}.brow.bhead{font-size:8px}.managerpill{font-size:10px;padding:3px 6px}.managerpill.small{font-size:9.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(82px,1fr) minmax(54px,.8fr) 38px 50px;gap:5px;padding:6px}.trophyrow.compact b{font-size:15px}.dotrow{grid-template-columns:1fr}.dotsline{gap:3px}.outcomedot{width:8px;height:8px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.mystatcards{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.mystatcard{padding:8px}.mystatcard span{font-size:9px}.mystatcard b{font-size:18px}.filtercollapse{display:grid;grid-template-columns:1fr 1fr;gap:7px}.filtercollapse .clearfilterbtn{width:100%}.filterpanel{gap:6px;padding:8px}.groupsview{grid-template-columns:1fr}.charthead{align-items:flex-start}.calendarpill{font-size:10.5px}}
 
 `;
