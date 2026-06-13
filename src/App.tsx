@@ -953,7 +953,10 @@ export default function App() {
     return (
       <span
         className={`managerpill ${small ? "small" : ""}`}
-        style={{ background: PLAYER_COLORS[p.id] }}
+        style={{
+          borderColor: PLAYER_COLORS[p.id],
+          background: `${PLAYER_COLORS[p.id]}22`,
+        }}
       >
         {children || p.name}
       </span>
@@ -1208,7 +1211,18 @@ export default function App() {
         <div className="charthead"><div><div className="glabel">RESULT DOTS</div><div className="subtle">Green win · orange draw · red loss · grey not played</div></div></div>
         <div className="dotsgrid">
           {players.map((p) => (
-            <div key={p.id} className="dotrow"><span className="dotlabel"><ManagerPill player={p} /></span><span className="dotsline">{(outcomeMatrix[p.id] || []).map((o, idx) => <span key={idx} title={`${labelFor[o.result]} — ${nameFor(o.team)}`} className={`outcomedot ${o.result}`} />)}</span></div>
+            <div
+              key={p.id}
+              className="dotrow compactResultRow"
+              style={{ borderColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}22` }}
+            >
+              <span className="dotlabel"><ManagerPill player={p} /></span>
+              <span className="dotsline">
+                {(outcomeMatrix[p.id] || []).map((o, idx) => (
+                  <span key={idx} title={`${labelFor[o.result]} — ${nameFor(o.team)}`} className={`outcomedot ${o.result}`} />
+                ))}
+              </span>
+            </div>
           ))}
         </div>
       </div>
@@ -1349,12 +1363,90 @@ export default function App() {
     );
   };
 
+
+  const ManagerPerformanceTable = () => (
+    <div className="chartbox">
+      <div className="charthead">
+        <div>
+          <div className="glabel">MANAGER PERFORMANCE</div>
+          <div className="subtle">Points won, goal difference and chance of winning</div>
+        </div>
+      </div>
+      <div className="rankinglist compact managerperf">
+        <div className="rankingrow rankinghead">
+          <span>No.</span>
+          <span>Manager</span>
+          <span>Pts</span>
+          <span>GD</span>
+          <span>Chance</span>
+        </div>
+        {board.map((p, idx) => {
+          const chance = trophyChances.find((x) => x.id === p.id)?.chance || 0;
+          return (
+            <div
+              key={p.id}
+              className="rankingrow managerrow"
+              style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}
+            >
+              <span className="ranknum">{idx + 1}</span>
+              <span className="rankowner"><ManagerPill player={p} small /></span>
+              <span>{p.pts}</span>
+              <span>{gdText(p.gd)}</span>
+              <b>{chance}%</b>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const MyTeamsTable = ({ teams, selected }) => (
+    <div className="chartbox">
+      <div className="charthead">
+        <div>
+          <div className="glabel">{selected.name}'S TEAMS</div>
+          <div className="subtle">FIFA ranking, goal difference, points and chance of winning</div>
+        </div>
+      </div>
+      <div className="rankinglist compact mystatstable">
+        <div className="rankingrow rankinghead">
+          <span>Team</span>
+          <span>FIFA</span>
+          <span>GD</span>
+          <span>Pts</span>
+          <span>Chance</span>
+        </div>
+        {teams
+          .slice()
+          .sort((a, b) => (FIFA_RANKINGS[a] || 999) - (FIFA_RANKINGS[b] || 999))
+          .map((tid) => {
+            const t = tournamentData.teamStats[tid];
+            const alive = tournamentData.alive.has(tid);
+            const chance = Math.round(teamChanceQuality(tid, tournamentData.alive));
+            return (
+              <div
+                key={tid}
+                className={`rankingrow ${alive ? "rag-green" : "rag-red"}`}
+              >
+                <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
+                <span>#{FIFA_RANKINGS[tid] || "—"}</span>
+                <span>{gdText(t.gd)}</span>
+                <b>{t.pts}</b>
+                <span>{alive ? `${chance}%` : "0%"}</span>
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+
   const TrophyChances = () => (
     <div className="chartbox">
       <div className="charthead"><div><div className="glabel">TROPHY CHANCES</div><div className="subtle">Weighted by real results, remaining teams, FIFA ranking strength and projected fixture matchups</div></div></div>
       <div className="trophygrid compact">
         <div className="trophyrow trophyhead">
           <span>Manager</span>
+          <span></span>
           <span>Chance</span>
           <span>Avg FIFA</span>
         </div>
@@ -1363,7 +1455,7 @@ export default function App() {
             <ManagerPill player={p} />
             <div className="trophybar"><i style={{ width: `${Math.max(3, p.chance)}%`, background: PLAYER_COLORS[p.id] }} /></div>
             <b>{p.chance}%</b>
-            <span>{p.avgRank ? `#${p.avgRank}` : "—"}</span>
+            <span className="avgfifa">{p.avgRank ? `#${p.avgRank}` : "—"}</span>
           </div>
         ))}
       </div>
@@ -1419,25 +1511,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="chartbox">
-          <div className="charthead"><div><div className="glabel">{selected.name}'S TEAMS</div><div className="subtle">Points, goal difference, FIFA ranking and survival status</div></div></div>
-          <div className="teamstatgrid">
-            {teams
-              .slice()
-              .sort((a, b) => (FIFA_RANKINGS[a] || 999) - (FIFA_RANKINGS[b] || 999))
-              .map((tid) => {
-                const t = tournamentData.teamStats[tid];
-                return (
-                  <div key={tid} className={`teamstatcard compact ${tournamentData.alive.has(tid) ? "rag-green" : "rag-red"}`}>
-                    <b>{TEAMS[tid][1]} {TEAMS[tid][0]}</b>
-                    <span>{t.pts} pts</span>
-                    <span>GD {gdText(t.gd)}</span>
-                    <span>FIFA #{FIFA_RANKINGS[tid] || "—"}</span>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
+        <MyTeamsTable teams={teams} selected={selected} />
 
 
         <div className="chartbox">
@@ -1753,7 +1827,8 @@ export default function App() {
             {board.map((p, i) => (
               <div key={p.id}>
                 <button
-                  className={"brow" + (i === 0 && p.pts > 0 ? " lead" : "")}
+                  className={"brow managerLeagueRow" + (i === 0 && p.pts > 0 ? " lead" : "")}
+                  style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}
                   onClick={() => setExpanded(expanded === p.id ? null : p.id)}
                 >
                   <span>{i + 1}</span>
@@ -1791,6 +1866,7 @@ export default function App() {
               </div>
             ))}
           </div>
+          <ManagerPerformanceTable />
           <PointsRaceChart />
           <PositionRaceChart />
           <OutcomeDots />
@@ -1873,6 +1949,88 @@ const CSS = `
 .teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px}.teamstatcard.compact{display:grid;grid-template-columns:1fr auto;gap:3px 7px;padding:8px;border-left:4px solid #ffffff22}.teamstatcard.compact b{grid-column:1/-1;font-size:12.5px}.teamstatcard.compact span{font-size:11px}.teamstatcard.rag-green{border-left-color:#31c46b;background:rgba(49,196,107,.10)}.teamstatcard.rag-amber{border-left-color:#e8a23b;background:rgba(232,162,59,.10)}.teamstatcard.rag-red{border-left-color:#df5548;background:rgba(223,85,72,.10)}.trophygrid.compact{gap:5px}.trophyrow.compact,.trophyrow.trophyhead{display:grid;grid-template-columns:1fr 58px 66px 50px;gap:8px;align-items:center;padding:7px 8px;border:1px solid #ffffff12;border-radius:8px;background:#0C1F15;font-size:12px}.trophyrow.trophyhead{background:transparent;color:#9FBFA8;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.trophyrow.compact b{font-family:'Saira Condensed';font-size:18px;color:#E8B33B}.grow,.grow.qualrow{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}.grow.ghead{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}@media(max-width:560px){.grow,.grow.qualrow,.grow.ghead{grid-template-columns:1.05fr .72fr 24px 28px 28px 48px;font-size:10.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:1fr 50px 54px 44px;font-size:11px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* mobile cleanup overrides */
-.managerpill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 8px;color:#0C1F15;font-weight:800;font-size:11px;line-height:1.1;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.managerpill.small{font-size:10px;padding:2px 6px}.managerpill.none{background:#5d665e;color:#C8D8CC}.owner .dot,.legenddot{display:none}.match.managerwin{box-shadow:0 0 0 1px #ffffff0d inset}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px 58px}.trophyrow.compact .trophybar{height:8px;min-width:60px}.trophyrow.compact b{font-size:16px;text-align:right}.dotrow{grid-template-columns:auto 1fr;align-items:center}.dotlabel{min-width:82px}.dotsline{align-items:center}.outcomedot{width:9px;height:9px}.teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}.teamstatcard.compact{padding:7px;gap:2px}.teamstatcard.compact b{font-size:12px}.teamstatcard.compact span,.teamstatcard.compact small{font-size:10.5px}.todaybtn.on{background:#E8B33B;color:#0C1F15;border-color:#E8B33B;font-weight:800}.filtercollapse{align-items:stretch}.filtercollapse .clearfilterbtn{min-height:34px}.scoreline{gap:6px}.teamcell{min-width:0}.grpbadge{letter-spacing:.08em}.grow{min-width:0}.grow span{min-width:0;overflow:hidden;text-overflow:ellipsis}.brow span{min-width:0;overflow:hidden;text-overflow:ellipsis}@media(max-width:560px){.pane{padding:12px 10px}.hero{padding:20px 14px 14px}h1{font-size:38px}.panehead{align-items:flex-start}.match,.lockcard,.chartbox,.groupbox,.board{padding:8px;border-radius:9px}.matchmeta{gap:5px}.city{font-size:10.5px}.tname{font-size:12px}.scorebox.readonly{font-size:20px;gap:4px}.brow{grid-template-columns:20px minmax(72px,1fr) 23px 20px 20px 20px 28px 34px 36px;padding:9px 6px;font-size:10.5px}.brow.bhead{font-size:8px}.managerpill{font-size:10px;padding:3px 6px}.managerpill.small{font-size:9.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(82px,1fr) minmax(54px,.8fr) 38px 50px;gap:5px;padding:6px}.trophyrow.compact b{font-size:15px}.dotrow{grid-template-columns:1fr}.dotsline{gap:3px}.outcomedot{width:8px;height:8px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.mystatcards{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.mystatcard{padding:8px}.mystatcard span{font-size:9px}.mystatcard b{font-size:18px}.filtercollapse{display:grid;grid-template-columns:1fr 1fr;gap:7px}.filtercollapse .clearfilterbtn{width:100%}.filterpanel{gap:6px;padding:8px}.groupsview{grid-template-columns:1fr}.charthead{align-items:flex-start}.calendarpill{font-size:10.5px}}
+.managerpill{display:inline-flex;align-items:center;justify-content:center;border:1px solid;border-radius:999px;padding:3px 8px;color:#F0EDE2;font-weight:800;font-size:11px;line-height:1.1;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.managerpill.small{font-size:10px;padding:2px 6px}.managerpill.none{border-color:#5d665e;background:#5d665e22;color:#C8D8CC}.owner .dot,.legenddot{display:none}.match.managerwin{box-shadow:0 0 0 1px #ffffff0d inset}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px 58px}.trophyrow.compact .trophybar{height:8px;min-width:60px}.trophyrow.compact b{font-size:16px;text-align:right}.dotrow{grid-template-columns:auto 1fr;align-items:center}.dotlabel{min-width:82px}.dotsline{align-items:center}.outcomedot{width:9px;height:9px}.teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}.teamstatcard.compact{padding:7px;gap:2px}.teamstatcard.compact b{font-size:12px}.teamstatcard.compact span,.teamstatcard.compact small{font-size:10.5px}.todaybtn.on{background:#E8B33B;color:#0C1F15;border-color:#E8B33B;font-weight:800}.filtercollapse{align-items:stretch}.filtercollapse .clearfilterbtn{min-height:34px}.scoreline{gap:6px}.teamcell{min-width:0}.grpbadge{letter-spacing:.08em}.grow{min-width:0}.grow span{min-width:0;overflow:hidden;text-overflow:ellipsis}.brow span{min-width:0;overflow:hidden;text-overflow:ellipsis}@media(max-width:560px){.pane{padding:12px 10px}.hero{padding:20px 14px 14px}h1{font-size:38px}.panehead{align-items:flex-start}.match,.lockcard,.chartbox,.groupbox,.board{padding:8px;border-radius:9px}.matchmeta{gap:5px}.city{font-size:10.5px}.tname{font-size:12px}.scorebox.readonly{font-size:20px;gap:4px}.brow{grid-template-columns:20px minmax(72px,1fr) 23px 20px 20px 20px 28px 34px 36px;padding:9px 6px;font-size:10.5px}.brow.bhead{font-size:8px}.managerpill{font-size:10px;padding:3px 6px}.managerpill.small{font-size:9.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(82px,1fr) minmax(54px,.8fr) 38px 50px;gap:5px;padding:6px}.trophyrow.compact b{font-size:15px}.dotrow{grid-template-columns:1fr}.dotsline{gap:3px}.outcomedot{width:8px;height:8px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.mystatcards{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.mystatcard{padding:8px}.mystatcard span{font-size:9px}.mystatcard b{font-size:18px}.filtercollapse{display:grid;grid-template-columns:1fr 1fr;gap:7px}.filtercollapse .clearfilterbtn{width:100%}.filterpanel{gap:6px;padding:8px}.groupsview{grid-template-columns:1fr}.charthead{align-items:flex-start}.calendarpill{font-size:10.5px}}
 
+
+
+/* requested polish */
+.teamcell .managerpill{
+  width:82px;
+  min-width:82px;
+  max-width:82px;
+}
+.teamcell.r .managerpill{
+  width:82px;
+  min-width:82px;
+  max-width:82px;
+}
+.managerLeagueRow{
+  border-left:4px solid transparent!important;
+  border-radius:7px;
+  margin:2px 0;
+}
+.brow.managerLeagueRow.lead{
+  background-image:none!important;
+}
+.compactResultRow{
+  display:flex!important;
+  align-items:center;
+  gap:8px;
+  border:1px solid;
+  border-radius:9px;
+  padding:6px 8px;
+}
+.compactResultRow .dotlabel{
+  min-width:auto;
+  flex:0 0 auto;
+}
+.compactResultRow .dotsline{
+  flex:1;
+  min-width:0;
+}
+.trophyrow.trophyhead span:nth-child(3),
+.trophyrow.trophyhead span:nth-child(4),
+.trophyrow.compact b,
+.trophyrow.compact .avgfifa{
+  text-align:center;
+}
+.rankinglist.managerperf .rankingrow,
+.rankinglist.mystatstable .rankingrow{
+  display:grid;
+  gap:8px;
+  align-items:center;
+  border-left:4px solid transparent;
+}
+.rankinglist.managerperf .rankingrow{
+  grid-template-columns:34px minmax(92px,1fr) 42px 42px 58px;
+}
+.rankinglist.mystatstable .rankingrow{
+  grid-template-columns:minmax(120px,1fr) 48px 42px 42px 58px;
+}
+.rankinglist.mystatstable .rankingrow.rag-green{
+  border-left-color:#31c46b;
+  background:rgba(49,196,107,.10);
+}
+.rankinglist.mystatstable .rankingrow.rag-red{
+  border-left-color:#df5548;
+  background:rgba(223,85,72,.10);
+}
+@media(max-width:560px){
+  .teamcell .managerpill,.teamcell.r .managerpill{
+    width:74px;
+    min-width:74px;
+    max-width:74px;
+  }
+  .rankinglist.managerperf .rankingrow{
+    grid-template-columns:24px minmax(78px,1fr) 34px 36px 48px;
+    font-size:10.5px;
+  }
+  .rankinglist.mystatstable .rankingrow{
+    grid-template-columns:minmax(92px,1fr) 42px 36px 34px 46px;
+    font-size:10.5px;
+  }
+  .compactResultRow{
+    align-items:flex-start;
+  }
+}
 `;
