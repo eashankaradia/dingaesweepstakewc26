@@ -176,6 +176,25 @@ function fifaRankScore(tid) {
   return Math.max(1, 212 - rank);
 }
 
+function expectedPointsFromRanks(teamCode, opponentCode) {
+  const teamStrength = fifaRankScore(teamCode);
+  const opponentStrength = fifaRankScore(opponentCode);
+  const diff = teamStrength - opponentStrength;
+
+  // Lightweight prediction model: stronger FIFA-ranked teams get more expected points,
+  // but draws remain possible so underdogs are not treated as zero.
+  const winProb = Math.max(0.12, Math.min(0.78, 0.45 + diff / 320));
+  const drawProb = Math.max(0.16, Math.min(0.32, 0.26 - Math.abs(diff) / 1000));
+
+  return winProb * 3 + drawProb;
+}
+
+function teamChanceQuality(tid, aliveSet) {
+  if (!aliveSet.has(tid)) return 0;
+  const rank = FIFA_RANKINGS[tid] || 211;
+  return Math.max(0, 100 - ((rank - 1) / 210) * 100);
+}
+
 function fifaStrengthScore(tid) {
   const rank = FIFA_RANKINGS[tid] || 211;
   // 100 = best team in the world, ~1 = lowest ranked teams.
@@ -544,65 +563,77 @@ export default function App() {
   }, [state.players, state.ownership, state.apiMatches, tournamentData.alive]);
 
   const trophyChances = useMemo(() => {
-    const scores = board.map((p) => {
-      const aliveTeams = Object.keys(p.teams || {}).filter((tid) =>
-        tournamentData.alive.has(tid),
-      );
+    const futureMatches = state.apiMatches.filter(
+      (m) =>
+        m.homeCode &&
+        m.awayCode &&
+        !isFinished(m) &&
+        tournamentData.alive.has(m.homeCode) &&
+        tournamentData.alive.has(m.awayCode),
+    );
 
-      const fifaStrength = aliveTeams.reduce(
-        (sum, tid) => sum + fifaStrengthScore(tid),
+    const scores = board.map((p) => {
+      const ownedTeams = Object.keys(p.teams || {});
+      const aliveTeams = ownedTeams.filter((tid) => tournamentData.alive.has(tid));
+      const aliveRanks = aliveTeams
+        .map((tid) => FIFA_RANKINGS[tid] || 211)
+        .sort((a, b) => a - b);
+
+      const avgRank = aliveRanks.length
+        ? Math.round(aliveRanks.reduce((sum, r) => sum + r, 0) / aliveRanks.length)
+        : null;
+      const bestRank = aliveRanks.length ? aliveRanks[0] : null;
+
+      const rankingStrength = aliveTeams.reduce(
+        (sum, tid) => sum + teamChanceQuality(tid, tournamentData.alive),
         0,
       );
 
-      const bestRank = aliveTeams.reduce(
-        (best, tid) => Math.min(best, FIFA_RANKINGS[tid] || 211),
-        211,
-      );
-
-      const averageRank =
-        aliveTeams.length > 0
-          ? Math.round(
-              aliveTeams.reduce(
-                (sum, tid) => sum + (FIFA_RANKINGS[tid] || 211),
-                0,
-              ) / aliveTeams.length,
-            )
-          : null;
-
-      const bestTeamBoost = bestRank <= 5 ? 18 : bestRank <= 10 ? 12 : bestRank <= 20 ? 7 : 0;
+      const projectedFixturePoints = futureMatches.reduce((sum, m) => {
+        if (state.ownership[m.homeCode] === p.id) {
+          return sum + expectedPointsFromRanks(m.homeCode, m.awayCode);
+        }
+        if (state.ownership[m.awayCode] === p.id) {
+          return sum + expectedPointsFromRanks(m.awayCode, m.homeCode);
+        }
+        return sum;
+      }, 0);
 
       const raw = Math.max(
         0,
-        p.pts * 4.5 +
-          p.gd * 1.5 +
-          p.gf * 0.75 +
+        // Real tournament performance still matters.
+        p.pts * 5 +
+          p.gd * 1.75 +
+          p.gf * 0.7 +
+          // Remaining teams matter, but their quality matters more.
           p.alive * 7 +
-          fifaStrength * 0.8 +
-          bestTeamBoost +
+          rankingStrength * 1.35 +
+          // Remaining fixtures are projected from FIFA ranking matchups.
+          projectedFixturePoints * 4.5 +
           1,
       );
 
       return {
         ...p,
         raw,
-        fifaStrength,
-        averageRank,
-        bestRank: bestRank === 211 ? null : bestRank,
+        rankingStrength,
+        projectedFixturePoints,
+        avgRank,
+        bestRank,
       };
     });
 
     const total = scores.reduce((sum, p) => sum + p.raw, 0) || 1;
-
     return scores
       .map((p) => ({ ...p, chance: Math.round((p.raw / total) * 100) }))
       .sort(
         (a, b) =>
           b.chance - a.chance ||
           b.pts - a.pts ||
-          (a.averageRank || 999) - (b.averageRank || 999) ||
+          (a.avgRank || 999) - (b.avgRank || 999) ||
           a.name.localeCompare(b.name),
       );
-  }, [board, tournamentData.alive]);
+  }, [board, tournamentData.alive, state.apiMatches, state.ownership]);
 
   const pointsRace = useMemo(() => {
     const finished = state.apiMatches
@@ -1295,28 +1326,20 @@ export default function App() {
 
   const TrophyChances = () => (
     <div className="chartbox">
-      <div className="charthead">
-        <div>
-          <div className="glabel">TROPHY CHANCES</div>
-          <div className="subtle">
-            Weighted by current points, GD, goals, alive teams, and actual FIFA world ranking strength
-          </div>
+      <div className="charthead"><div><div className="glabel">TROPHY CHANCES</div><div className="subtle">Weighted by real results, remaining teams, FIFA ranking strength and projected fixture matchups</div></div></div>
+      <div className="trophygrid compact">
+        <div className="trophyrow trophyhead">
+          <span>Manager</span>
+          <span>Chance</span>
+          <span>Avg FIFA</span>
+          <span>Best</span>
         </div>
-      </div>
-      <div className="trophygrid">
         {trophyChances.map((p) => (
-          <div key={p.id} className="trophyrow">
-            <span>
-              <span className="pdot solo" style={{ background: PLAYER_COLORS[p.id] }} />
-              {p.name}
-            </span>
-            <div className="trophybar">
-              <i style={{ width: `${Math.max(3, p.chance)}%`, background: PLAYER_COLORS[p.id] }} />
-            </div>
+          <div key={p.id} className="trophyrow compact">
+            <span><span className="pdot solo" style={{ background: PLAYER_COLORS[p.id] }} />{p.name}</span>
             <b>{p.chance}%</b>
-            <small>
-              Avg FIFA rank {p.averageRank ? `#${p.averageRank}` : "—"} · best {p.bestRank ? `#${p.bestRank}` : "—"}
-            </small>
+            <span>{p.avgRank ? `#${p.avgRank}` : "—"}</span>
+            <span>{p.bestRank ? `#${p.bestRank}` : "—"}</span>
           </div>
         ))}
       </div>
@@ -1346,6 +1369,7 @@ export default function App() {
       }, {}),
     ).sort((a, b) => new Date(a[0]) - new Date(b[0]));
     const playerColor = PLAYER_COLORS[selected.id];
+    const selectedChance = trophyChances.find((p) => p.id === selected.id)?.chance || 0;
 
     return (
       <section className="pane">
@@ -1366,8 +1390,8 @@ export default function App() {
             <b>{leaguePosition}</b>
           </div>
           <div className="mystatcard" style={{ background: `${playerColor}2f`, borderColor: playerColor }}>
-            <span>Goal difference</span>
-            <b>{gdText(selectedRow.gd)}</b>
+            <span>Chance to win</span>
+            <b>{selectedChance}%</b>
           </div>
         </div>
 
@@ -1380,21 +1404,17 @@ export default function App() {
               .map((tid) => {
                 const t = tournamentData.teamStats[tid];
                 return (
-                  <div key={tid} className={`teamstatcard ${tournamentData.alive.has(tid) ? "" : "out"}`}>
+                  <div key={tid} className={`teamstatcard compact ${tournamentData.alive.has(tid) ? "rag-green" : "rag-red"}`}>
                     <b>{TEAMS[tid][1]} {TEAMS[tid][0]}</b>
-                    <span>{t.pts} pts · GD {gdText(t.gd)}</span>
-                    <span>FIFA rank #{FIFA_RANKINGS[tid] || "—"}</span>
-                    <small>{tournamentData.alive.has(tid) ? "Still alive" : "Knocked out"}</small>
+                    <span>{t.pts} pts</span>
+                    <span>GD {gdText(t.gd)}</span>
+                    <span>FIFA #{FIFA_RANKINGS[tid] || "—"}</span>
                   </div>
                 );
               })}
           </div>
         </div>
 
-        <div className="chartbox">
-          <div className="charthead"><div><div className="glabel">MY FIXTURES</div><div className="subtle">Every fixture involving {selected.name}'s teams</div></div></div>
-          {selectedMatches.length === 0 ? <div className="empty small">No fixtures loaded yet.</div> : selectedMatches.map((m) => <ResultRow key={m.id} m={m} />)}
-        </div>
 
         <div className="chartbox">
           <div className="charthead"><div><div className="glabel">MY MATCH CALENDAR</div><div className="subtle">Grouped by match date</div></div></div>
@@ -1438,6 +1458,7 @@ export default function App() {
             <div className="grow ghead qualrow">
               <span>Team</span>
               <span>Manager</span>
+              <span>GP</span>
               <span>Pts</span>
               <span>GD</span>
               <span>Status</span>
@@ -1462,6 +1483,7 @@ export default function App() {
                     {row.flag} {row.name}
                   </span>
                   <span>{owner ? owner.name : "—"}</span>
+                  <span>{row.gp}</span>
                   <b>{row.pts}</b>
                   <span>{gdText(row.gd)}</span>
                   <span className={`qualpill ${alive ? "alive" : "out"}`}>{alive ? "Alive" : "Out"}</span>
@@ -1822,5 +1844,8 @@ const CSS = `
 *{box-sizing:border-box;margin:0;padding:0}.app{min-height:100vh;background:#0C1F15;color:#F0EDE2;font-family:Inter,system-ui,sans-serif;font-size:14px;padding-bottom:76px;width:100%;max-width:none;margin:0}.hero{padding:26px 18px 18px;border-bottom:1px solid #ffffff14}.eyebrow{font-family:'Saira Condensed';letter-spacing:.22em;font-size:11px;color:#9FBFA8}h1{font-family:'Saira Condensed';font-weight:800;font-size:44px;line-height:.95;margin:6px 0 8px;color:#E8B33B}h1 span{color:#E8B33B}.rules,.subtle,.hintline,.syncmsg,.city{font-size:12px;color:#9FBFA8}.pane{padding:16px 14px}.panehead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}h2{font-family:'Saira Condensed';font-weight:800;font-size:24px;text-transform:uppercase;color:#E8B33B}.lockcard,.match,.board,.groupbox,.bracketbox,.chartbox{background:#10271A;border:1px solid #ffffff12;border-radius:10px;padding:10px;margin-bottom:9px}.lockname{font-family:'Saira Condensed';font-size:18px;font-weight:800;display:flex;align-items:center}.lockrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.lockteam{font-size:11.5px;background:#0C1F15;border:1px solid #ffffff14;border-radius:999px;padding:4px 9px;display:inline-flex;align-items:center;gap:6px}.lockteam.editing{border-radius:8px;padding:6px 7px}.editdraftbtn{background:#E8B33B;color:#0C1F15;border:0;border-radius:8px;padding:8px 13px;font-weight:800;cursor:pointer;font-size:12px}.draftnameinput{background:#0C1F15;border:1px solid #E8B33B66;border-radius:7px;color:#F0EDE2;padding:6px 8px;font-family:Inter,system-ui,sans-serif;font-size:14px;font-weight:700;min-width:130px}.ownerselect{background:#10271A;border:1px solid #ffffff24;color:#F0EDE2;border-radius:6px;padding:3px 5px;font-size:11px;max-width:110px}.pdot.solo{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;flex:0 0 auto}.syncbar{display:flex;gap:10px;align-items:center;margin:2px 0 10px;flex-wrap:wrap}.syncbtn{background:#E8B33B;color:#0C1F15;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer}.syncbtn:disabled{opacity:.45;cursor:not-allowed;background:#5d665e;color:#C8D8CC}.filterbar{display:flex;align-items:center;gap:8px;margin:0 0 10px;color:#9FBFA8;font-size:12px;flex-wrap:wrap}.filtercollapse{display:flex;gap:8px;align-items:center;margin:0 0 10px;flex-wrap:wrap}.filtertoggle{min-width:116px}.filterpanel{background:#10271A;border:1px solid #ffffff12;border-radius:10px;padding:10px;margin:0 0 10px;display:grid;grid-template-columns:1fr;gap:7px;color:#9FBFA8;font-size:12px}.filterpanel label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#9FBFA8}.filterpanel .filterselect{width:100%;min-width:0}.filterselect{background:#0C1F15;border:1px solid #ffffff24;color:#F0EDE2;border-radius:8px;padding:8px 10px;font-size:13px;min-width:190px}.filterselect.small{min-width:130px}.filterselect.date{min-width:145px}.clearfilterbtn{background:transparent;border:1px solid #ffffff2a;color:#F0EDE2;border-radius:8px;padding:8px 10px;font-size:12px;cursor:pointer}.matchmeta{display:flex;gap:8px;align-items:center;margin-bottom:7px;flex-wrap:wrap}.grpbadge{font-family:'Saira Condensed';font-size:11px;letter-spacing:.14em;color:#0C1F15;background:#9FBFA8;border-radius:4px;padding:2px 6px}.grpbadge.done{background:#E8B33B}.grpbadge.live{background:#E0635C}.grpbadge.future{background:#9FBFA8}.scoreline{display:flex;align-items:center;gap:8px}.teamcell{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.teamcell.r{text-align:right;align-items:flex-end}.tname{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}.owner{font-size:10.5px;display:inline-flex;align-items:center;gap:5px}.owner .dot{width:6px;height:6px;border-radius:50%}.owner.none{color:#5d7a66}.scorebox.readonly{display:flex;align-items:center;gap:6px;font-family:'Saira Condensed';font-weight:800;font-size:24px;color:#E8B33B}.brow{display:grid;grid-template-columns:24px 1fr 28px 24px 24px 24px 34px 42px 44px;align-items:center;width:100%;padding:11px 10px;background:transparent;border:0;border-bottom:1px solid #ffffff0d;color:#F0EDE2;text-align:left;font-size:12.5px}.brow.bhead{font-size:9px;color:#9FBFA8;text-transform:uppercase}.brow.lead{background:linear-gradient(90deg,#E8B33B22,transparent 70%)}.squad{background:#0C1F15;border-bottom:1px solid #ffffff0d;padding:4px 0}.squadrow{display:flex;justify-content:space-between;padding:6px 14px;font-size:12.5px;color:#C8D8CC}.glabel{font-family:'Saira Condensed';font-weight:800;letter-spacing:.18em;font-size:11px;color:#E8B33B;margin-bottom:6px;text-transform:uppercase}.empty{text-align:center;color:#9FBFA8;padding:18px}.empty.small{padding:8px}.groupsview{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.grow{display:grid;grid-template-columns:1.3fr .9fr 34px 34px;gap:8px;align-items:center;border-left:4px solid transparent;border-bottom:1px solid #ffffff0c;padding:7px 8px;font-size:12px}.grow.ghead{color:#9FBFA8;text-transform:uppercase;font-size:9px;background:transparent;border-left-color:transparent}.out{opacity:.38;filter:grayscale(1)}.chartbox{margin-top:14px}.charthead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.racechart{width:100%;height:auto;display:block;background:#0C1F15;border:1px solid #ffffff10;border-radius:8px}.gridline{stroke:#ffffff14;stroke-width:1}.axisline{stroke:#ffffff2a;stroke-width:1}.axistext{fill:#9FBFA8;font-size:11px;font-family:Inter,system-ui,sans-serif}.axislabel{fill:#9FBFA8;font-size:10px;font-family:Inter,system-ui,sans-serif;letter-spacing:.04em}.chartlegend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:11.5px;color:#C8D8CC}.legenddot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:9999;padding:18px}.modalCard{width:340px;max-width:100%;background:#10271A;border:1px solid #E8B33B66;border-radius:14px;padding:18px;box-shadow:0 18px 60px #0008}.modalCard h3{font-family:'Saira Condensed';font-size:24px;font-weight:800;text-transform:uppercase;color:#E8B33B;margin:0 0 8px}.modalText{font-size:13px;color:#F0EDE2;margin:0 0 12px;line-height:1.35}.modalCard input{width:100%;background:#0C1F15;border:1px solid #ffffff24;border-radius:8px;color:#F0EDE2;padding:10px 11px;font-size:14px}.modalCard input:focus{outline:2px solid #E8B33B;border-color:transparent}.modalError{color:#E0635C;font-size:12px;margin-top:8px}.modalButtons{display:flex;gap:8px;margin-top:12px}.modalButtons button{flex:1;border:0;border-radius:8px;padding:9px 12px;font-weight:800;cursor:pointer}.modalUnlock{background:#E8B33B;color:#0C1F15}.modalCancel{background:transparent;color:#F0EDE2;border:1px solid #ffffff2a!important}.tabbar{position:fixed;bottom:0;left:0;right:0;width:100%;max-width:none;margin:0;display:flex;background:#0A1A11F2;border-top:1px solid #ffffff1a}.tabbar button{flex:1;background:transparent;border:0;color:#9FBFA8;font-family:'Saira Condensed';font-weight:600;letter-spacing:.1em;font-size:12px;text-transform:uppercase;padding:15px 0;cursor:pointer}.tabbar button.on{color:#E8B33B;box-shadow:inset 0 3px 0 #E8B33B}.tableintro{margin:-5px 0 10px}.statcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}.statcard,.rivalcard,.teamstatcard,.pathcard,.heatgroup{background:#0C1F15;border:1px solid #ffffff12;border-radius:10px;padding:10px}.statcard{display:flex;flex-direction:column;gap:4px}.statcard b{font-size:16px;color:#F0EDE2}.statcard span,.rivalcard span,.rivalcard em,.teamstatcard span,.teamstatcard small,.pathcard span,.heatteam small{font-size:12px;color:#9FBFA8}.rivalgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}.rivalcard{display:flex;flex-direction:column;gap:3px}.rivalcard em{font-style:normal;color:#E8B33B}.dotsgrid{display:flex;flex-direction:column;gap:8px}.dotrow{display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center}.dotlabel{font-size:12px;font-weight:700}.dotsline{display:flex;flex-wrap:wrap;gap:4px}.outcomedot{width:10px;height:10px;border-radius:50%;display:inline-block;background:#73796f}.outcomedot.w{background:#31c46b}.outcomedot.d{background:#e8a23b}.outcomedot.l{background:#df5548}.outcomedot.future{background:#68736b}.heatmapgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:8px}.heatgroup{display:flex;flex-direction:column;gap:6px}.heatgroup b{font-family:'Saira Condensed';color:#E8B33B;letter-spacing:.08em}.heatteam{border:1px solid #ffffff22;border-radius:8px;padding:6px 7px;display:flex;justify-content:space-between;gap:6px;font-size:12px}.heatteam.mutedheat{background:#0C1F15;border-color:#ffffff14;color:#9FBFA8}.pathgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}.pathcard{border-left:4px solid #ffffff22}.pathcard b{display:block;margin-bottom:2px}.pathsteps{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.pathsteps span{border:1px solid #ffffff18;border-radius:999px;padding:3px 7px;background:#10271A}.qualrow,.grow.qualrow{grid-template-columns:1.2fr .8fr 34px 34px 58px}.grow{grid-template-columns:1.2fr .8fr 34px 34px 58px}.qualpill{font-size:10px;border-radius:999px;padding:3px 6px;text-align:center;background:#5d665e;color:#F0EDE2}.qualpill.alive{background:#2f7d4f}.qualpill.out{background:#6b403c}.teamstatgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.teamstatcard{display:flex;flex-direction:column;gap:4px}.teamstatcard b{font-size:14px}.tabbar button{font-size:11px}.trophygrid{display:flex;flex-direction:column;gap:8px}.trophyrow{display:grid;grid-template-columns:120px 1fr 44px;gap:6px 8px;align-items:center;font-size:12px}.trophyrow small{grid-column:2/4;color:#9FBFA8;font-size:10.5px}.trophybar{height:10px;background:#0C1F15;border:1px solid #ffffff18;border-radius:999px;overflow:hidden}.trophybar i{display:block;height:100%;border-radius:999px}.bracketgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.bracketround{background:#0C1F15;border:1px solid #ffffff12;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px}.bracketround>b{font-family:'Saira Condensed';color:#E8B33B;text-transform:uppercase;letter-spacing:.08em}.bracketmatch{background:#10271A;border:1px solid #ffffff14;border-radius:8px;padding:7px;font-size:12px;display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center}.bracketmatch span:last-of-type{text-align:right}.bracketmatch strong{font-family:'Saira Condensed';font-size:18px;color:#E8B33B}.bracketmatch small{grid-column:1/-1;color:#9FBFA8;font-size:10px}@media(max-width:560px){.dotrow{grid-template-columns:1fr}.grow{grid-template-columns:1.1fr .8fr 30px 30px 54px}.brow{grid-template-columns:22px 1fr 25px 22px 22px 22px 30px 36px 38px;font-size:11px}}
 
 .rankinglist{display:grid;grid-template-columns:1fr;gap:5px}.rankingrow{display:grid;grid-template-columns:38px minmax(120px,1fr) 58px minmax(72px,.7fr);gap:8px;align-items:center;background:#0C1F15;border:1px solid #ffffff12;border-left:4px solid #ffffff22;border-radius:8px;padding:7px 8px;font-size:12px}.rankingrow.rankinghead{border-left-color:transparent;background:transparent;color:#9FBFA8;text-transform:uppercase;font-size:9px;letter-spacing:.08em;padding-top:2px;padding-bottom:2px}.ranknum{font-family:'Saira Condensed';font-weight:800;color:#E8B33B;font-size:15px}.rankteam{font-weight:700}.rankfifa{font-family:'Saira Condensed';font-weight:800;color:#F0EDE2;font-size:15px}.rankowner{font-size:11px;color:#C8D8CC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mystatcards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:10px 0 12px}.mystatcard{border:1px solid #ffffff22;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:4px}.mystatcard span{font-size:11px;color:#C8D8CC;text-transform:uppercase;letter-spacing:.08em}.mystatcard b{font-family:'Saira Condensed';font-size:30px;line-height:1;color:#F0EDE2}.calendarlist{display:flex;flex-direction:column;gap:8px}.calendarday{background:#0C1F15;border:1px solid #ffffff12;border-radius:10px;padding:9px}.calendarday>b{display:block;font-family:'Saira Condensed';color:#E8B33B;font-size:17px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}.calendarday>div{display:flex;flex-wrap:wrap;gap:6px}.calendarpill{border:1px solid #ffffff18;background:#10271A;border-radius:999px;padding:5px 8px;font-size:11.5px;color:#C8D8CC}.calendarpill.done{border-color:#E8B33B66}.calendarpill.live{border-color:#E0635C88;color:#F0EDE2}.calendarpill.future{opacity:.8}@media(max-width:560px){.mystatcards{grid-template-columns:repeat(3,minmax(0,1fr))}.rankingrow{grid-template-columns:30px minmax(92px,1fr) 46px minmax(54px,.7fr);gap:5px;font-size:11px}.rankowner{grid-column:auto}.rankfifa{font-size:14px}.mystatcard{padding:9px 7px}.mystatcard b{font-size:24px}.mystatcard span{font-size:9px}}
+
+/* requested compact updates */
+.teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px}.teamstatcard.compact{display:grid;grid-template-columns:1fr auto;gap:3px 7px;padding:8px;border-left:4px solid #ffffff22}.teamstatcard.compact b{grid-column:1/-1;font-size:12.5px}.teamstatcard.compact span{font-size:11px}.teamstatcard.rag-green{border-left-color:#31c46b;background:rgba(49,196,107,.10)}.teamstatcard.rag-amber{border-left-color:#e8a23b;background:rgba(232,162,59,.10)}.teamstatcard.rag-red{border-left-color:#df5548;background:rgba(223,85,72,.10)}.trophygrid.compact{gap:5px}.trophyrow.compact,.trophyrow.trophyhead{display:grid;grid-template-columns:1fr 58px 66px 50px;gap:8px;align-items:center;padding:7px 8px;border:1px solid #ffffff12;border-radius:8px;background:#0C1F15;font-size:12px}.trophyrow.trophyhead{background:transparent;color:#9FBFA8;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.trophyrow.compact b{font-family:'Saira Condensed';font-size:18px;color:#E8B33B}.grow,.grow.qualrow{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}.grow.ghead{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}@media(max-width:560px){.grow,.grow.qualrow,.grow.ghead{grid-template-columns:1.05fr .72fr 24px 28px 28px 48px;font-size:10.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:1fr 50px 54px 44px;font-size:11px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 `;
