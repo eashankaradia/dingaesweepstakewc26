@@ -202,11 +202,13 @@ function fifaStrengthScore(tid) {
 }
 
 function matchupWinProbability(teamCode, opponentCode) {
-  const teamStrength = Math.max(1, Math.pow(fifaRankScore(teamCode), 1.15));
+  // World Cup win chance should be driven mainly by FIFA strength versus the path ahead.
+  // The exponent deliberately gives stronger FIFA-ranked teams more separation without ever making a game certain.
+  const teamStrength = Math.max(1, Math.pow(fifaRankScore(teamCode), 1.95));
   const avgMatch = String(opponentCode || "").match(/^AVG_(\d+)/);
   const opponentBaseStrength = avgMatch ? Math.max(1, 212 - Number(avgMatch[1])) : fifaRankScore(opponentCode);
-  const opponentStrength = Math.max(1, Math.pow(opponentBaseStrength, 1.15));
-  return Math.max(0.05, Math.min(0.9, teamStrength / (teamStrength + opponentStrength)));
+  const opponentStrength = Math.max(1, Math.pow(opponentBaseStrength, 1.95));
+  return Math.max(0.03, Math.min(0.92, teamStrength / (teamStrength + opponentStrength)));
 }
 
 function percentageText(value) {
@@ -636,8 +638,8 @@ export default function App() {
       );
 
       const currentFormBoost = Math.max(
-        0.72,
-        Math.min(1.28, 1 + t.pts * 0.035 + t.gd * 0.025),
+        0.94,
+        Math.min(1.06, 1 + t.pts * 0.006 + t.gd * 0.004),
       );
 
       return {
@@ -1357,7 +1359,7 @@ export default function App() {
         <div className="charthead">
           <div>
             <div className="glabel">COUNTRY PERFORMANCE</div>
-            <div className="subtle">Country World Cup chances, based on FIFA ranking strength and visible upcoming matchups</div>
+            <div className="subtle">Country World Cup chances, heavily weighted by FIFA ranking strength and visible upcoming matchups</div>
           </div>
         </div>
         <div className="rankinglist compact performance">
@@ -1491,7 +1493,11 @@ export default function App() {
           <span>Avg FIFA</span>
         </div>
         {trophyChances.map((p) => (
-          <div key={p.id} className="trophyrow compact">
+          <div
+            key={p.id}
+            className="trophyrow compact managerchance"
+            style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}
+          >
             <ManagerPill player={p} small />
             <div className="trophybar"><i style={{ width: `${Math.max(3, p.chance)}%`, background: PLAYER_COLORS[p.id] }} /></div>
             <b>{percentageText(p.chance)}</b>
@@ -1547,7 +1553,7 @@ export default function App() {
           </div>
           <div className="mystatcard" style={{ background: `${playerColor}2f`, borderColor: playerColor }}>
             <span>Chance to win</span>
-            <b>{selectedChance}%</b>
+            <b>{selectedChance.toFixed(2)}%</b>
           </div>
         </div>
 
@@ -2022,5 +2028,5 @@ const CSS = `
 
 
 /* Final probability and mobile polish */
-.managerpill{border:0!important;min-width:72px;max-width:72px;text-align:center;justify-content:center}.managerpill.small{min-width:58px;max-width:58px}.teamcell .managerpill{min-width:76px;max-width:76px}.trophyrow .managerpill{min-width:58px;max-width:58px}.brow{border-left:4px solid transparent}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:64px minmax(52px,.8fr) 58px 58px}.trophyrow.trophyhead span:nth-child(3),.trophyrow.trophyhead span:nth-child(4){text-align:center}.trophyrow.compact b,.trophyrow.compact>span:last-child{text-align:center}.managerResultPill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 8px;max-width:100%;overflow:hidden}.dotrow{grid-template-columns:1fr}.dotlabel{min-width:0}.managerResultPill .dotsline{display:inline-flex;flex-wrap:wrap;gap:4px}.rankinglist.performance{display:flex;flex-direction:column;gap:5px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(125px,1fr) 34px 38px 58px 64px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(120px,1fr) 46px 34px 38px 62px}.countryperfrow,.mystatcountryrow{border-left:4px solid transparent}.mystatcountryrow.rag-green{border-left-color:#31c46b;background:#31c46b16}.mystatcountryrow.rag-red{border-left-color:#df5548;background:#df554816}.rankingrow b{color:#E8B33B}.rag-green{border-left-color:#31c46b}.rag-red{border-left-color:#df5548}.managerpill{color:#F0EDE2}@media(max-width:560px){.managerpill{min-width:62px;max-width:62px;font-size:9.5px}.managerpill.small{min-width:52px;max-width:52px}.teamcell .managerpill{min-width:64px;max-width:64px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:56px minmax(44px,.7fr) 52px 50px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(104px,1fr) 28px 32px 52px 54px;font-size:10px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(98px,1fr) 40px 28px 34px 54px;font-size:10px}.managerResultPill{border-radius:10px;align-items:flex-start;flex-direction:column;gap:5px;width:100%}.managerResultPill .dotsline{gap:3px}}
+.managerpill{border:0!important;min-width:72px;max-width:72px;text-align:center;justify-content:center}.managerpill.small{min-width:58px;max-width:58px}.teamcell .managerpill{min-width:76px;max-width:76px}.trophyrow .managerpill{min-width:58px;max-width:58px}.brow{border-left:4px solid transparent}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:64px minmax(52px,.8fr) 58px 58px}.trophyrow.managerchance{border-left:4px solid transparent}.trophyrow.trophyhead span:nth-child(3),.trophyrow.trophyhead span:nth-child(4){text-align:center}.trophyrow.compact b,.trophyrow.compact>span:last-child{text-align:center}.managerResultPill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 8px;max-width:100%;overflow:hidden;white-space:nowrap}.dotrow{grid-template-columns:1fr}.dotlabel{min-width:0}.managerResultPill .dotsline{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}.rankinglist.performance{display:flex;flex-direction:column;gap:5px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(125px,1fr) 34px 38px 58px 64px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(120px,1fr) 46px 34px 38px 62px}.countryperfrow,.mystatcountryrow{border-left:4px solid transparent}.mystatcountryrow.rag-green{border-left-color:#31c46b;background:#31c46b16}.mystatcountryrow.rag-red{border-left-color:#df5548;background:#df554816}.rankingrow b{color:#E8B33B}.rag-green{border-left-color:#31c46b}.rag-red{border-left-color:#df5548}.managerpill{color:#F0EDE2}@media(max-width:560px){.managerpill{min-width:62px;max-width:62px;font-size:9.5px}.managerpill.small{min-width:52px;max-width:52px}.teamcell .managerpill{min-width:64px;max-width:64px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:56px minmax(44px,.7fr) 52px 50px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(104px,1fr) 28px 32px 52px 54px;font-size:10px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(98px,1fr) 40px 28px 34px 54px;font-size:10px}.managerResultPill{border-radius:999px;align-items:center;flex-direction:row;gap:6px;width:auto;max-width:100%}.managerResultPill .dotsline{gap:3px}}
 `;
