@@ -201,6 +201,20 @@ function fifaStrengthScore(tid) {
   return Math.max(1, Math.round(((212 - rank) / 211) * 100));
 }
 
+function matchupWinProbability(teamCode, opponentCode) {
+  const teamStrength = Math.max(1, Math.pow(fifaRankScore(teamCode), 1.15));
+  const avgMatch = String(opponentCode || "").match(/^AVG_(\d+)/);
+  const opponentBaseStrength = avgMatch ? Math.max(1, 212 - Number(avgMatch[1])) : fifaRankScore(opponentCode);
+  const opponentStrength = Math.max(1, Math.pow(opponentBaseStrength, 1.15));
+  return Math.max(0.05, Math.min(0.9, teamStrength / (teamStrength + opponentStrength)));
+}
+
+function percentageText(value) {
+  if (!Number.isFinite(value)) return "0.0%";
+  if (value > 0 && value < 0.1) return "<0.1%";
+  return `${value.toFixed(1)}%`;
+}
+
 const TEAM_IDS = Object.keys(TEAMS);
 const GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 const PLAYER_COLORS = [
@@ -579,6 +593,74 @@ export default function App() {
 
   }, [state.players, state.ownership, state.apiMatches, tournamentData.alive]);
 
+  const teamWorldCupChances = useMemo(() => {
+    const visibleFutureMatches = state.apiMatches.filter(
+      (m) => m.homeCode && m.awayCode && !isFinished(m),
+    );
+
+    const aliveTeams = TEAM_IDS.filter((tid) => tournamentData.alive.has(tid));
+    const averageAliveStrength =
+      aliveTeams.reduce((sum, tid) => sum + fifaRankScore(tid), 0) /
+        Math.max(1, aliveTeams.length) || 80;
+    const averageOpponentRank = Math.max(1, Math.round(212 - averageAliveStrength));
+
+    const rawRows = TEAM_IDS.map((tid) => {
+      const t = tournamentData.teamStats[tid];
+      const alive = tournamentData.alive.has(tid);
+      if (!alive) {
+        return {
+          tid,
+          raw: 0,
+          chance: 0,
+          avgOpponentRank: null,
+          visibleGames: 0,
+        };
+      }
+
+      const visibleMatches = visibleFutureMatches.filter(
+        (m) => m.homeCode === tid || m.awayCode === tid,
+      );
+
+      const visiblePathProb = visibleMatches.reduce((prob, m) => {
+        const opponent = m.homeCode === tid ? m.awayCode : m.homeCode;
+        return prob * matchupWinProbability(tid, opponent);
+      }, 1);
+
+      const assumedKnockoutGames = Math.max(
+        1,
+        5 - visibleMatches.filter((m) => !isGroupMatch(m)).length,
+      );
+      const genericKnockoutProb = Math.pow(
+        matchupWinProbability(tid, `AVG_${averageOpponentRank}`),
+        assumedKnockoutGames,
+      );
+
+      const currentFormBoost = Math.max(
+        0.72,
+        Math.min(1.28, 1 + t.pts * 0.035 + t.gd * 0.025),
+      );
+
+      return {
+        tid,
+        raw: visiblePathProb * genericKnockoutProb * currentFormBoost,
+        chance: 0,
+        avgOpponentRank: averageOpponentRank,
+        visibleGames: visibleMatches.length,
+      };
+    });
+
+    const total = rawRows.reduce((sum, r) => sum + r.raw, 0) || 1;
+    return Object.fromEntries(
+      rawRows.map((r) => [
+        r.tid,
+        {
+          ...r,
+          chance: (r.raw / total) * 100,
+        },
+      ]),
+    );
+  }, [state.apiMatches, tournamentData.alive, tournamentData.teamStats]);
+
   const trophyChances = useMemo(() => {
     const futureMatches = state.apiMatches.filter(
       (m) =>
@@ -599,10 +681,9 @@ export default function App() {
       const avgRank = aliveRanks.length
         ? Math.round(aliveRanks.reduce((sum, r) => sum + r, 0) / aliveRanks.length)
         : null;
-      const bestRank = aliveRanks.length ? aliveRanks[0] : null;
 
-      const rankingStrength = aliveTeams.reduce(
-        (sum, tid) => sum + teamChanceQuality(tid, tournamentData.alive),
+      const teamWorldCupChance = aliveTeams.reduce(
+        (sum, tid) => sum + (teamWorldCupChances[tid]?.chance || 0),
         0,
       );
 
@@ -618,31 +699,27 @@ export default function App() {
 
       const raw = Math.max(
         0,
-        // Real tournament performance still matters.
-        p.pts * 5 +
-          p.gd * 1.75 +
-          p.gf * 0.7 +
-          // Remaining teams matter, but their quality matters more.
-          p.alive * 7 +
-          rankingStrength * 1.35 +
-          // Remaining fixtures are projected from FIFA ranking matchups.
-          projectedFixturePoints * 4.5 +
+        p.pts * 7 +
+          p.gd * 2 +
+          p.gf * 0.9 +
+          p.alive * 5 +
+          projectedFixturePoints * 3.2 +
+          teamWorldCupChance * 5 +
           1,
       );
 
       return {
         ...p,
         raw,
-        rankingStrength,
         projectedFixturePoints,
+        teamWorldCupChance,
         avgRank,
-        bestRank,
       };
     });
 
     const total = scores.reduce((sum, p) => sum + p.raw, 0) || 1;
     return scores
-      .map((p) => ({ ...p, chance: Math.round((p.raw / total) * 100) }))
+      .map((p) => ({ ...p, chance: (p.raw / total) * 100 }))
       .sort(
         (a, b) =>
           b.chance - a.chance ||
@@ -650,7 +727,7 @@ export default function App() {
           (a.avgRank || 999) - (b.avgRank || 999) ||
           a.name.localeCompare(b.name),
       );
-  }, [board, tournamentData.alive, state.apiMatches, state.ownership]);
+  }, [board, tournamentData.alive, state.apiMatches, state.ownership, teamWorldCupChances]);
 
   const pointsRace = useMemo(() => {
     const finished = state.apiMatches
@@ -954,7 +1031,6 @@ export default function App() {
       <span
         className={`managerpill ${small ? "small" : ""}`}
         style={{
-          borderColor: PLAYER_COLORS[p.id],
           background: `${PLAYER_COLORS[p.id]}22`,
         }}
       >
@@ -1211,18 +1287,7 @@ export default function App() {
         <div className="charthead"><div><div className="glabel">RESULT DOTS</div><div className="subtle">Green win · orange draw · red loss · grey not played</div></div></div>
         <div className="dotsgrid">
           {players.map((p) => (
-            <div
-              key={p.id}
-              className="dotrow compactResultRow"
-              style={{ borderColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}22` }}
-            >
-              <span className="dotlabel"><ManagerPill player={p} /></span>
-              <span className="dotsline">
-                {(outcomeMatrix[p.id] || []).map((o, idx) => (
-                  <span key={idx} title={`${labelFor[o.result]} — ${nameFor(o.team)}`} className={`outcomedot ${o.result}`} />
-                ))}
-              </span>
-            </div>
+            <div key={p.id} className="dotrow"><span className="dotlabel"><span className="managerResultPill" style={{ background: `${PLAYER_COLORS[p.id]}22` }}><ManagerPill player={p} small /> <span className="dotsline">{(outcomeMatrix[p.id] || []).map((o, idx) => <span key={idx} title={`${labelFor[o.result]} — ${nameFor(o.team)}`} className={`outcomedot ${o.result}`} />)}</span></span></span></div>
           ))}
         </div>
       </div>
@@ -1264,6 +1329,58 @@ export default function App() {
               </div>
             );
           })}
+        </div>
+      </div>
+    );
+  };
+
+  const CountryPerformance = ({ playerId = null }) => {
+    const selectedId = playerId == null ? null : Number(playerId);
+    const rows = TEAM_IDS
+      .filter((tid) => selectedId == null || state.ownership[tid] === selectedId)
+      .map((tid) => {
+        const owner = ownerOf(tid);
+        const t = tournamentData.teamStats[tid];
+        const chance = teamWorldCupChances[tid]?.chance || 0;
+        return {
+          tid,
+          owner,
+          ...t,
+          chance,
+          rank: FIFA_RANKINGS[tid] || 999,
+        };
+      })
+      .sort((a, b) => b.chance - a.chance || b.pts - a.pts || a.rank - b.rank);
+
+    return (
+      <div className="chartbox">
+        <div className="charthead">
+          <div>
+            <div className="glabel">COUNTRY PERFORMANCE</div>
+            <div className="subtle">Country World Cup chances, based on FIFA ranking strength and visible upcoming matchups</div>
+          </div>
+        </div>
+        <div className="rankinglist compact performance">
+          <div className="rankingrow rankinghead countryperfhead">
+            <span>Team</span>
+            <span>Pts</span>
+            <span>GD</span>
+            <span>Chance</span>
+            <span>Owner</span>
+          </div>
+          {rows.map((row) => (
+            <div
+              key={row.tid}
+              className={`rankingrow countryperfrow ${tournamentData.alive.has(row.tid) ? "" : "out"}`}
+              style={row.owner ? { borderLeftColor: row.owner.color, background: `${row.owner.color}18` } : undefined}
+            >
+              <span className="rankteam">{TEAMS[row.tid][1]} {TEAMS[row.tid][0]}</span>
+              <span>{row.pts}</span>
+              <span>{gdText(row.gd)}</span>
+              <b>{percentageText(row.chance)}</b>
+              <span>{row.owner ? <ManagerPill player={row.owner} small /> : "—"}</span>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -1363,86 +1480,9 @@ export default function App() {
     );
   };
 
-
-  const ManagerPerformanceTable = () => (
-    <div className="chartbox">
-      <div className="charthead">
-        <div>
-          <div className="glabel">MANAGER PERFORMANCE</div>
-          <div className="subtle">Points won, goal difference and chance of winning</div>
-        </div>
-      </div>
-      <div className="rankinglist compact managerperf">
-        <div className="rankingrow rankinghead">
-          <span>No.</span>
-          <span>Manager</span>
-          <span>Pts</span>
-          <span>GD</span>
-          <span>Chance</span>
-        </div>
-        {board.map((p, idx) => {
-          const chance = trophyChances.find((x) => x.id === p.id)?.chance || 0;
-          return (
-            <div
-              key={p.id}
-              className="rankingrow managerrow"
-              style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}
-            >
-              <span className="ranknum">{idx + 1}</span>
-              <span className="rankowner"><ManagerPill player={p} small /></span>
-              <span>{p.pts}</span>
-              <span>{gdText(p.gd)}</span>
-              <b>{chance}%</b>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-
-  const MyTeamsTable = ({ teams, selected }) => (
-    <div className="chartbox">
-      <div className="charthead">
-        <div>
-          <div className="glabel">{selected.name}'S TEAMS</div>
-          <div className="subtle">FIFA ranking, goal difference, points and chance of winning</div>
-        </div>
-      </div>
-      <div className="rankinglist compact mystatstable">
-        <div className="rankingrow rankinghead">
-          <span>Team</span>
-          <span>FIFA</span>
-          <span>GD</span>
-          <span>Pts</span>
-          <span>Chance</span>
-        </div>
-        {teams
-          .slice()
-          .sort((a, b) => (FIFA_RANKINGS[a] || 999) - (FIFA_RANKINGS[b] || 999))
-          .map((tid) => {
-            const t = tournamentData.teamStats[tid];
-            const alive = tournamentData.alive.has(tid);
-            const chance = Math.round(teamChanceQuality(tid, tournamentData.alive));
-            return (
-              <div
-                key={tid}
-                className={`rankingrow ${alive ? "rag-green" : "rag-red"}`}
-              >
-                <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
-                <span>#{FIFA_RANKINGS[tid] || "—"}</span>
-                <span>{gdText(t.gd)}</span>
-                <b>{t.pts}</b>
-                <span>{alive ? `${chance}%` : "0%"}</span>
-              </div>
-            );
-          })}
-      </div>
-    </div>
-  );
-
   const TrophyChances = () => (
     <div className="chartbox">
-      <div className="charthead"><div><div className="glabel">TROPHY CHANCES</div><div className="subtle">Weighted by real results, remaining teams, FIFA ranking strength and projected fixture matchups</div></div></div>
+      <div className="charthead"><div><div className="glabel">LEAGUE WIN CHANCES</div><div className="subtle">Manager chance of winning the sweepstake, using current points plus projected future points from team World Cup chances</div></div></div>
       <div className="trophygrid compact">
         <div className="trophyrow trophyhead">
           <span>Manager</span>
@@ -1452,10 +1492,10 @@ export default function App() {
         </div>
         {trophyChances.map((p) => (
           <div key={p.id} className="trophyrow compact">
-            <ManagerPill player={p} />
+            <ManagerPill player={p} small />
             <div className="trophybar"><i style={{ width: `${Math.max(3, p.chance)}%`, background: PLAYER_COLORS[p.id] }} /></div>
-            <b>{p.chance}%</b>
-            <span className="avgfifa">{p.avgRank ? `#${p.avgRank}` : "—"}</span>
+            <b>{percentageText(p.chance)}</b>
+            <span>{p.avgRank ? `#${p.avgRank}` : "—"}</span>
           </div>
         ))}
       </div>
@@ -1511,7 +1551,35 @@ export default function App() {
           </div>
         </div>
 
-        <MyTeamsTable teams={teams} selected={selected} />
+        <div className="chartbox">
+          <div className="charthead"><div><div className="glabel">{selected.name}'S TEAMS</div><div className="subtle">Country World Cup chance, FIFA rank, points and goal difference</div></div></div>
+          <div className="rankinglist compact performance mystatcountrytable">
+            <div className="rankingrow rankinghead mystatcountryhead">
+              <span>Team</span>
+              <span>FIFA</span>
+              <span>Pts</span>
+              <span>GD</span>
+              <span>Chance</span>
+            </div>
+            {teams
+              .slice()
+              .sort((a, b) => (teamWorldCupChances[b]?.chance || 0) - (teamWorldCupChances[a]?.chance || 0))
+              .map((tid) => {
+                const t = tournamentData.teamStats[tid];
+                const alive = tournamentData.alive.has(tid);
+                const chance = teamWorldCupChances[tid]?.chance || 0;
+                return (
+                  <div key={tid} className={`rankingrow mystatcountryrow ${alive ? "rag-green" : "rag-red"}`}>
+                    <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
+                    <span>#{FIFA_RANKINGS[tid] || "—"}</span>
+                    <span>{t.pts}</span>
+                    <span>{gdText(t.gd)}</span>
+                    <b>{percentageText(chance)}</b>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
 
 
         <div className="chartbox">
@@ -1827,7 +1895,7 @@ export default function App() {
             {board.map((p, i) => (
               <div key={p.id}>
                 <button
-                  className={"brow managerLeagueRow" + (i === 0 && p.pts > 0 ? " lead" : "")}
+                  className={"brow" + (i === 0 && p.pts > 0 ? " lead" : "")}
                   style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}
                   onClick={() => setExpanded(expanded === p.id ? null : p.id)}
                 >
@@ -1866,11 +1934,11 @@ export default function App() {
               </div>
             ))}
           </div>
-          <ManagerPerformanceTable />
           <PointsRaceChart />
           <PositionRaceChart />
           <OutcomeDots />
           <TrophyChances />
+          <CountryPerformance />
         </section>
       )}
 
@@ -1953,84 +2021,6 @@ const CSS = `
 
 
 
-/* requested polish */
-.teamcell .managerpill{
-  width:82px;
-  min-width:82px;
-  max-width:82px;
-}
-.teamcell.r .managerpill{
-  width:82px;
-  min-width:82px;
-  max-width:82px;
-}
-.managerLeagueRow{
-  border-left:4px solid transparent!important;
-  border-radius:7px;
-  margin:2px 0;
-}
-.brow.managerLeagueRow.lead{
-  background-image:none!important;
-}
-.compactResultRow{
-  display:flex!important;
-  align-items:center;
-  gap:8px;
-  border:1px solid;
-  border-radius:9px;
-  padding:6px 8px;
-}
-.compactResultRow .dotlabel{
-  min-width:auto;
-  flex:0 0 auto;
-}
-.compactResultRow .dotsline{
-  flex:1;
-  min-width:0;
-}
-.trophyrow.trophyhead span:nth-child(3),
-.trophyrow.trophyhead span:nth-child(4),
-.trophyrow.compact b,
-.trophyrow.compact .avgfifa{
-  text-align:center;
-}
-.rankinglist.managerperf .rankingrow,
-.rankinglist.mystatstable .rankingrow{
-  display:grid;
-  gap:8px;
-  align-items:center;
-  border-left:4px solid transparent;
-}
-.rankinglist.managerperf .rankingrow{
-  grid-template-columns:34px minmax(92px,1fr) 42px 42px 58px;
-}
-.rankinglist.mystatstable .rankingrow{
-  grid-template-columns:minmax(120px,1fr) 48px 42px 42px 58px;
-}
-.rankinglist.mystatstable .rankingrow.rag-green{
-  border-left-color:#31c46b;
-  background:rgba(49,196,107,.10);
-}
-.rankinglist.mystatstable .rankingrow.rag-red{
-  border-left-color:#df5548;
-  background:rgba(223,85,72,.10);
-}
-@media(max-width:560px){
-  .teamcell .managerpill,.teamcell.r .managerpill{
-    width:74px;
-    min-width:74px;
-    max-width:74px;
-  }
-  .rankinglist.managerperf .rankingrow{
-    grid-template-columns:24px minmax(78px,1fr) 34px 36px 48px;
-    font-size:10.5px;
-  }
-  .rankinglist.mystatstable .rankingrow{
-    grid-template-columns:minmax(92px,1fr) 42px 36px 34px 46px;
-    font-size:10.5px;
-  }
-  .compactResultRow{
-    align-items:flex-start;
-  }
-}
+/* Final probability and mobile polish */
+.managerpill{border:0!important;min-width:72px;max-width:72px;text-align:center;justify-content:center}.managerpill.small{min-width:58px;max-width:58px}.teamcell .managerpill{min-width:76px;max-width:76px}.trophyrow .managerpill{min-width:58px;max-width:58px}.brow{border-left:4px solid transparent}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:64px minmax(52px,.8fr) 58px 58px}.trophyrow.trophyhead span:nth-child(3),.trophyrow.trophyhead span:nth-child(4){text-align:center}.trophyrow.compact b,.trophyrow.compact>span:last-child{text-align:center}.managerResultPill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 8px;max-width:100%;overflow:hidden}.dotrow{grid-template-columns:1fr}.dotlabel{min-width:0}.managerResultPill .dotsline{display:inline-flex;flex-wrap:wrap;gap:4px}.rankinglist.performance{display:flex;flex-direction:column;gap:5px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(125px,1fr) 34px 38px 58px 64px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(120px,1fr) 46px 34px 38px 62px}.countryperfrow,.mystatcountryrow{border-left:4px solid transparent}.mystatcountryrow.rag-green{border-left-color:#31c46b;background:#31c46b16}.mystatcountryrow.rag-red{border-left-color:#df5548;background:#df554816}.rankingrow b{color:#E8B33B}.rag-green{border-left-color:#31c46b}.rag-red{border-left-color:#df5548}.managerpill{color:#F0EDE2}@media(max-width:560px){.managerpill{min-width:62px;max-width:62px;font-size:9.5px}.managerpill.small{min-width:52px;max-width:52px}.teamcell .managerpill{min-width:64px;max-width:64px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:56px minmax(44px,.7fr) 52px 50px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(104px,1fr) 28px 32px 52px 54px;font-size:10px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(98px,1fr) 40px 28px 34px 54px;font-size:10px}.managerResultPill{border-radius:10px;align-items:flex-start;flex-direction:column;gap:5px;width:100%}.managerResultPill .dotsline{gap:3px}}
 `;
