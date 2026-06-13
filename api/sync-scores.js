@@ -1,5 +1,6 @@
 let cachedResponse = null;
 let cachedAt = 0;
+let nextRefreshAt = 0;
 
 const CACHE_MS = 5 * 60 * 1000;
 
@@ -15,6 +16,7 @@ const TEAM_ALIASES = {
   Switzerland: "SUI",
   Qatar: "QAT",
   "Bosnia and Herzegovina": "BIH",
+  "Bosnia & Herz.": "BIH",
   Bosnia: "BIH",
   Brazil: "BRA",
   Morocco: "MAR",
@@ -216,12 +218,23 @@ export default async function handler(req, res) {
     const now = Date.now();
     const debugMode = req.query?.debug === "1" || req.query?.debug === "true";
 
-    if (!debugMode && cachedResponse && now - cachedAt < CACHE_MS) {
-      return res.status(200).json({
-        ...cachedResponse,
-        meta: { ...cachedResponse.meta, cached: true },
-      });
-    }
+if (
+  !debugMode &&
+  cachedResponse &&
+  now < nextRefreshAt
+) {
+  return res.status(200).json({
+    ...cachedResponse,
+    meta: {
+      ...cachedResponse.meta,
+      cached: true,
+      nextRefreshAt: new Date(nextRefreshAt).toISOString(),
+      minutesUntilRefresh: Math.ceil(
+        (nextRefreshAt - now) / 60000
+      ),
+    },
+  });
+}
 
     const apiKey = process.env.FOOTBALL_DATA_TOKEN;
 
@@ -378,8 +391,9 @@ export default async function handler(req, res) {
       },
     };
 
-    cachedResponse = response;
-    cachedAt = now;
+cachedResponse = response;
+cachedAt = now;
+nextRefreshAt = now + CACHE_MS;
 
     return res.status(200).json(response);
   } catch (err) {
