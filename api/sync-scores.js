@@ -424,7 +424,7 @@ export default async function handler(req, res) {
     const response = {
       matches,
       meta: {
-        source: "base-fixtures-plus-api-results-team-pair-merge",
+        source: "DEBUG-LATEST-MERGE-V3",
         cached: false,
         checkedAt: new Date().toISOString(),
         count: matches.length,
