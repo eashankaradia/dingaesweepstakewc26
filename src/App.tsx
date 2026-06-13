@@ -281,6 +281,7 @@ export default function App() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [statsPlayer, setStatsPlayer] = useState("0");
 
   useEffect(() => {
     try {
@@ -504,6 +505,126 @@ export default function App() {
 
     return rows;
   }, [state.apiMatches, state.players, state.ownership]);
+
+
+  const completedMatches = useMemo(
+    () =>
+      state.apiMatches
+        .filter((m) => m.homeCode && m.awayCode && isFinished(m))
+        .filter((m) => typeof m.homeGoals === "number" && typeof m.awayGoals === "number")
+        .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0)),
+    [state.apiMatches],
+  );
+
+  const rankRace = useMemo(() => {
+    const players = state.players;
+    const scores = Object.fromEntries(players.map((p) => [p.id, { pts: 0, gf: 0, ga: 0, gd: 0, w: 0 }]));
+    const rankSnapshot = (game, label = "Start") => {
+      const ordered = players
+        .map((p) => ({ ...p, ...scores[p.id] }))
+        .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.name.localeCompare(b.name));
+      const positions = {};
+      ordered.forEach((p, idx) => (positions[p.id] = idx + 1));
+      return { game, label, positions };
+    };
+    const rows = [rankSnapshot(0)];
+    completedMatches.forEach((m, idx) => {
+      const hOwner = state.ownership[m.homeCode];
+      const aOwner = state.ownership[m.awayCode];
+      const hRes = resultFor(m, "home");
+      const aRes = resultFor(m, "away");
+      if (hOwner != null) {
+        scores[hOwner].pts += hRes === "w" ? 3 : hRes === "d" ? 1 : 0;
+        scores[hOwner].gf += m.homeGoals;
+        scores[hOwner].ga += m.awayGoals;
+        scores[hOwner].gd = scores[hOwner].gf - scores[hOwner].ga;
+        if (hRes === "w") scores[hOwner].w++;
+      }
+      if (aOwner != null) {
+        scores[aOwner].pts += aRes === "w" ? 3 : aRes === "d" ? 1 : 0;
+        scores[aOwner].gf += m.awayGoals;
+        scores[aOwner].ga += m.homeGoals;
+        scores[aOwner].gd = scores[aOwner].gf - scores[aOwner].ga;
+        if (aRes === "w") scores[aOwner].w++;
+      }
+      rows.push(rankSnapshot(idx + 1, `${nameFor(m.homeCode, m.homeName)} v ${nameFor(m.awayCode, m.awayName)}`));
+    });
+    return rows;
+  }, [completedMatches, state.players, state.ownership]);
+
+  const teamsRemainingRace = useMemo(() => {
+    const alive = new Set(TEAM_IDS);
+    const counts = () => Object.fromEntries(state.players.map((p) => [p.id, TEAM_IDS.filter((tid) => state.ownership[tid] === p.id && alive.has(tid)).length]));
+    const rows = [{ game: 0, counts: counts() }];
+    completedMatches.forEach((m, idx) => {
+      if (!isGroupMatch(m) && m.homeGoals !== m.awayGoals) {
+        alive.delete(m.homeGoals > m.awayGoals ? m.awayCode : m.homeCode);
+      }
+      rows.push({ game: idx + 1, counts: counts() });
+    });
+    return rows;
+  }, [completedMatches, state.players, state.ownership]);
+
+  const outcomeMatrix = useMemo(() => {
+    const rows = Object.fromEntries(state.players.map((p) => [p.id, []]));
+    state.apiMatches
+      .slice()
+      .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
+      .forEach((m) => {
+        const sides = [
+          { code: m.homeCode, side: "home", goalsFor: m.homeGoals, goalsAgainst: m.awayGoals },
+          { code: m.awayCode, side: "away", goalsFor: m.awayGoals, goalsAgainst: m.homeGoals },
+        ];
+        sides.forEach((s) => {
+          const pid = state.ownership[s.code];
+          if (pid == null || !rows[pid]) return;
+          let result = "future";
+          if (isFinished(m) && typeof m.homeGoals === "number" && typeof m.awayGoals === "number") result = resultFor(m, s.side);
+          rows[pid].push({ match: m, result, team: s.code });
+        });
+      });
+    return rows;
+  }, [state.apiMatches, state.players, state.ownership]);
+
+  const dailyAwards = useMemo(() => {
+    const byDate = {};
+    completedMatches.forEach((m) => {
+      const d = localDateKey(m.date) || "Unknown";
+      byDate[d] = byDate[d] || Object.fromEntries(state.players.map((p) => [p.id, 0]));
+      const hOwner = state.ownership[m.homeCode];
+      const aOwner = state.ownership[m.awayCode];
+      const hRes = resultFor(m, "home");
+      const aRes = resultFor(m, "away");
+      if (hOwner != null) byDate[d][hOwner] += hRes === "w" ? 3 : hRes === "d" ? 1 : 0;
+      if (aOwner != null) byDate[d][aOwner] += aRes === "w" ? 3 : aRes === "d" ? 1 : 0;
+    });
+    const dates = Object.keys(byDate).sort();
+    const latest = dates[dates.length - 1];
+    if (!latest) return null;
+    const sorted = state.players.map((p) => ({ ...p, points: byDate[latest][p.id] || 0 })).sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+    return { date: latest, best: sorted[0], worst: sorted[sorted.length - 1], rows: sorted };
+  }, [completedMatches, state.players, state.ownership]);
+
+  const biggestMovers = useMemo(() => {
+    if (rankRace.length < 2) return [];
+    const prev = rankRace[rankRace.length - 2].positions;
+    const curr = rankRace[rankRace.length - 1].positions;
+    return state.players
+      .map((p) => ({ ...p, movement: (prev[p.id] || 0) - (curr[p.id] || 0), position: curr[p.id] }))
+      .sort((a, b) => Math.abs(b.movement) - Math.abs(a.movement) || a.name.localeCompare(b.name));
+  }, [rankRace, state.players]);
+
+  const shareText = useMemo(() => {
+    const lines = ["🏆 DINGAE SWEEPSTAKE", "", ...board.slice(0, 6).map((p, i) => `${i + 1}. ${p.name} — ${p.pts} pts, GD ${gdText(p.gd)}, ${p.alive} alive`)];
+    const next = state.apiMatches.find((m) => !isFinished(m));
+    if (next) lines.push("", `Next: ${flagForTeam(next.homeCode, next.homeName)} ${nameFor(next.homeCode, next.homeName)} v ${nameFor(next.awayCode, next.awayName)} ${flagForTeam(next.awayCode, next.awayName)}`);
+    return lines.join("\n");
+  }, [board, state.apiMatches]);
+
+  const shareToWhatsApp = () => {
+    const url = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   const filteredMatches = useMemo(() => {
     return state.apiMatches.filter((m) => {
@@ -797,6 +918,147 @@ export default function App() {
     );
   };
 
+
+  const PositionRaceChart = () => {
+    const players = state.players;
+    const data = rankRace;
+    const finishedCount = Math.max(0, data.length - 1);
+    const width = 640, height = 260, padL = 34, padR = 14, padT = 18, padB = 34;
+    const innerW = width - padL - padR;
+    const innerH = height - padT - padB;
+    const xFor = (game) => padL + (finishedCount === 0 ? 0 : (game / finishedCount) * innerW);
+    const yFor = (pos) => padT + ((pos - 1) / Math.max(1, players.length - 1)) * innerH;
+    return (
+      <div className="chartbox">
+        <div className="charthead"><div><div className="glabel">POSITION RACE</div><div className="subtle">League position after each completed game</div></div></div>
+        {finishedCount === 0 ? <div className="empty small">Position race appears after completed games.</div> : (
+          <>
+            <svg className="racechart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Position race chart">
+              {players.map((_, idx) => (
+                <g key={idx + 1}>
+                  <line x1={padL} x2={width - padR} y1={yFor(idx + 1)} y2={yFor(idx + 1)} className="gridline" />
+                  <text x={padL - 8} y={yFor(idx + 1) + 4} className="axistext" textAnchor="end">{idx + 1}</text>
+                </g>
+              ))}
+              <line x1={padL} x2={width - padR} y1={height - padB} y2={height - padB} className="axisline" />
+              <line x1={padL} x2={padL} y1={padT} y2={height - padB} className="axisline" />
+              {[0, Math.ceil(finishedCount / 2), finishedCount].map((t) => <text key={t} x={xFor(t)} y={height - 10} className="axistext" textAnchor="middle">{t}</text>)}
+              <text x={width / 2} y={height - 1} className="axislabel" textAnchor="middle">Game number</text>
+              <text x={10} y={height / 2} className="axislabel" textAnchor="middle" transform={`rotate(-90 10 ${height / 2})`}>Position</text>
+              {players.map((p) => {
+                const points = data.map((row) => `${xFor(row.game)},${yFor(row.positions[p.id] || players.length)}`).join(" ");
+                const last = data[data.length - 1];
+                return <g key={p.id}><polyline points={points} fill="none" stroke={PLAYER_COLORS[p.id]} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /><circle cx={xFor(last.game)} cy={yFor(last.positions[p.id] || players.length)} r="4" fill={PLAYER_COLORS[p.id]} /></g>;
+              })}
+            </svg>
+            <div className="chartlegend">{players.map((p) => <span key={p.id}><span className="legenddot" style={{ background: PLAYER_COLORS[p.id] }} />{p.name}</span>)}</div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const TeamsRemainingRaceChart = () => {
+    const players = state.players;
+    const data = teamsRemainingRace;
+    const finishedCount = Math.max(0, data.length - 1);
+    const width = 640, height = 240, padL = 34, padR = 14, padT = 18, padB = 34;
+    const innerW = width - padL - padR;
+    const innerH = height - padT - padB;
+    const xFor = (game) => padL + (finishedCount === 0 ? 0 : (game / finishedCount) * innerW);
+    const yFor = (count) => padT + innerH - (count / 8) * innerH;
+    return (
+      <div className="chartbox">
+        <div className="charthead"><div><div className="glabel">TEAMS REMAINING RACE</div><div className="subtle">How many teams each manager still has alive</div></div></div>
+        <svg className="racechart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Teams remaining chart">
+          {[0, 4, 8].map((t) => <g key={t}><line x1={padL} x2={width - padR} y1={yFor(t)} y2={yFor(t)} className="gridline" /><text x={padL - 8} y={yFor(t) + 4} className="axistext" textAnchor="end">{t}</text></g>)}
+          <line x1={padL} x2={width - padR} y1={height - padB} y2={height - padB} className="axisline" />
+          <line x1={padL} x2={padL} y1={padT} y2={height - padB} className="axisline" />
+          {players.map((p) => {
+            const points = data.map((row) => `${xFor(row.game)},${yFor(row.counts[p.id] || 0)}`).join(" ");
+            const last = data[data.length - 1];
+            return <g key={p.id}><polyline points={points} fill="none" stroke={PLAYER_COLORS[p.id]} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /><circle cx={xFor(last.game)} cy={yFor(last.counts[p.id] || 0)} r="4" fill={PLAYER_COLORS[p.id]} /></g>;
+          })}
+        </svg>
+      </div>
+    );
+  };
+
+  const OutcomeDots = ({ playerId = null }) => {
+    const players = playerId == null ? state.players : state.players.filter((p) => p.id === Number(playerId));
+    const labelFor = { w: "Win", d: "Draw", l: "Loss", future: "Not played" };
+    return (
+      <div className="chartbox">
+        <div className="charthead"><div><div className="glabel">RESULT DOTS</div><div className="subtle">Green win · orange draw · red loss · grey not played</div></div></div>
+        <div className="dotsgrid">
+          {players.map((p) => (
+            <div key={p.id} className="dotrow"><span className="dotlabel"><span className="pdot solo" style={{ background: PLAYER_COLORS[p.id] }} />{p.name}</span><span className="dotsline">{(outcomeMatrix[p.id] || []).map((o, idx) => <span key={idx} title={`${labelFor[o.result]} — ${nameFor(o.team)}`} className={`outcomedot ${o.result}`} />)}</span></div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const DailyAwards = () => (
+    <div className="statcards">
+      <div className="statcard"><div className="glabel">DAILY AWARD</div>{dailyAwards ? <><b>⭐ {dailyAwards.best.name}</b><span>{dailyAwards.best.points} pts on {dailyAwards.date}</span></> : <span>No completed games yet.</span>}</div>
+      <div className="statcard"><div className="glabel">BIGGEST MOVER</div>{biggestMovers[0] ? <><b>{biggestMovers[0].movement > 0 ? "📈" : biggestMovers[0].movement < 0 ? "📉" : "➖"} {biggestMovers[0].name}</b><span>{biggestMovers[0].movement > 0 ? "+" : ""}{biggestMovers[0].movement} places</span></> : <span>No movement yet.</span>}</div>
+      <div className="statcard"><div className="glabel">TEAMS LEFT</div><b>{board.reduce((sum, p) => sum + p.alive, 0)}</b><span>Total teams still alive</span></div>
+    </div>
+  );
+
+  const ManagerRivalries = () => (
+    <div className="chartbox">
+      <div className="charthead"><div><div className="glabel">MANAGER RIVALRIES</div><div className="subtle">Head-to-head comparison by current points</div></div></div>
+      <div className="rivalgrid">
+        {board.slice(0, 6).flatMap((a, i) => board.slice(i + 1).map((b) => (
+          <div key={`${a.id}-${b.id}`} className="rivalcard"><b>{a.name} v {b.name}</b><span>{a.pts} - {b.pts} pts</span><span>{a.alive} - {b.alive} alive</span><em>{a.pts === b.pts ? "Level" : `${a.pts > b.pts ? a.name : b.name} +${Math.abs(a.pts - b.pts)}`}</em></div>
+        )))}
+      </div>
+    </div>
+  );
+
+  const OwnershipHeatmap = () => (
+    <div className="chartbox">
+      <div className="charthead"><div><div className="glabel">OWNERSHIP HEATMAP</div><div className="subtle">Every country coloured by manager</div></div></div>
+      <div className="heatmapgrid">
+        {GROUPS.map((g) => <div key={g} className="heatgroup"><b>Group {g}</b>{TEAM_IDS.filter((tid) => TEAMS[tid][2] === g).map((tid) => { const o = ownerOf(tid); return <span key={tid} className={`heatteam ${tournamentData.alive.has(tid) ? "" : "out"}`} style={o ? { borderColor: o.color, background: `${o.color}22` } : undefined}>{TEAMS[tid][1]} {TEAMS[tid][0]}<small>{o?.name || "—"}</small></span>; })}</div>)}
+      </div>
+    </div>
+  );
+
+  const PathToFinal = () => {
+    const aliveTeams = TEAM_IDS.filter((tid) => tournamentData.alive.has(tid));
+    return (
+      <div className="chartbox">
+        <div className="charthead"><div><div className="glabel">PATH TO THE FINAL</div><div className="subtle">Placeholder route; knockout opponents update when API fixtures arrive</div></div></div>
+        <div className="pathgrid">
+          {aliveTeams.map((tid) => {
+            const nextMatch = state.apiMatches.find((m) => !isFinished(m) && (m.homeCode === tid || m.awayCode === tid));
+            const opponent = nextMatch ? (nextMatch.homeCode === tid ? nextMatch.awayCode : nextMatch.homeCode) : null;
+            const o = ownerOf(tid);
+            return <div key={tid} className="pathcard" style={o ? { borderLeftColor: o.color } : undefined}><b>{TEAMS[tid][1]} {TEAMS[tid][0]}</b><span>{o?.name || "—"}</span><div className="pathsteps"><span>Next: {opponent ? `${TEAMS[opponent]?.[1] || ""} ${nameFor(opponent)}` : "TBD"}</span><span>R32</span><span>R16</span><span>QF</span><span>SF</span><span>Final</span></div></div>;
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const StatsTab = () => {
+    const selected = state.players.find((p) => p.id === Number(statsPlayer)) || state.players[0];
+    const teams = TEAM_IDS.filter((tid) => state.ownership[tid] === selected.id);
+    return (
+      <section className="pane">
+        <div className="panehead"><h2>Stats</h2><select className="filterselect small" value={statsPlayer} onChange={(e) => setStatsPlayer(e.target.value)}>{state.players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        <DailyAwards />
+        <div className="chartbox"><div className="charthead"><div><div className="glabel">{selected.name}'S TEAMS</div><div className="subtle">Points, goal difference and survival status</div></div></div><div className="teamstatgrid">{teams.map((tid) => { const t = tournamentData.teamStats[tid]; return <div key={tid} className={`teamstatcard ${tournamentData.alive.has(tid) ? "" : "out"}`}><b>{TEAMS[tid][1]} {TEAMS[tid][0]}</b><span>{t.pts} pts · GD {gdText(t.gd)}</span><small>{tournamentData.alive.has(tid) ? "Still alive" : "Knocked out"}</small></div>; })}</div></div>
+        <OutcomeDots playerId={selected.id} />
+        <TeamsRemainingRaceChart />
+        <OwnershipHeatmap />
+      </section>
+    );
+  };
+
   const TournamentTab = () => (
     <section className="pane">
       <div className="panehead">
@@ -807,11 +1069,12 @@ export default function App() {
         {GROUPS.map((g) => (
           <div key={g} className="groupbox">
             <div className="glabel">GROUP {g}</div>
-            <div className="grow ghead">
+            <div className="grow ghead qualrow">
               <span>Team</span>
               <span>Manager</span>
               <span>Pts</span>
               <span>GD</span>
+              <span>Status</span>
             </div>
             {tournamentData.groupTables[g].map((row) => {
               const owner = row.owner;
@@ -835,12 +1098,15 @@ export default function App() {
                   <span>{owner ? owner.name : "—"}</span>
                   <b>{row.pts}</b>
                   <span>{gdText(row.gd)}</span>
+                  <span className={`qualpill ${alive ? "alive" : "out"}`}>{alive ? "Alive" : "Out"}</span>
                 </div>
               );
             })}
           </div>
         ))}
       </div>
+      <PathToFinal />
+      <OwnershipHeatmap />
       <div className="bracketbox">
         <div className="glabel">KNOCKOUT BRACKET</div>
         {state.apiMatches.filter((m) => !isGroupMatch(m)).length === 0 && (
@@ -1038,8 +1304,9 @@ export default function App() {
         <section className="pane">
           <div className="panehead">
             <h2>League Table</h2>
-            <div className="subtle">Points · GD · alive teams</div>
+            <button className="editdraftbtn" onClick={shareToWhatsApp}>Share to WhatsApp</button>
           </div>
+          <div className="subtle tableintro">Points · GD · alive teams</div>
           <div className="board">
             <div className="brow bhead">
               <span>#</span>
@@ -1099,10 +1366,16 @@ export default function App() {
             ))}
           </div>
           <PointsRaceChart />
+          <PositionRaceChart />
+          <TeamsRemainingRaceChart />
+          <OutcomeDots />
+          <DailyAwards />
+          <ManagerRivalries />
         </section>
       )}
 
       {tab === "tournament" && <TournamentTab />}
+      {tab === "stats" && <StatsTab />}
 
       {showPasswordModal && (
         <div className="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="edit-draft-title">
@@ -1151,6 +1424,7 @@ export default function App() {
           ["results", "Results"],
           ["table", "Table"],
           ["tournament", "Tournament"],
+          ["stats", "Stats"],
         ].map(([k, l]) => (
           <button
             key={k}
@@ -1167,5 +1441,6 @@ export default function App() {
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;800&family=Inter:wght@400;600;700&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}.app{min-height:100vh;background:#0C1F15;color:#F0EDE2;font-family:Inter,system-ui,sans-serif;font-size:14px;padding-bottom:76px;width:100%;max-width:none;margin:0}.hero{padding:26px 18px 18px;border-bottom:1px solid #ffffff14}.eyebrow{font-family:'Saira Condensed';letter-spacing:.22em;font-size:11px;color:#9FBFA8}h1{font-family:'Saira Condensed';font-weight:800;font-size:44px;line-height:.95;margin:6px 0 8px;color:#E8B33B}h1 span{color:#E8B33B}.rules,.subtle,.hintline,.syncmsg,.city{font-size:12px;color:#9FBFA8}.pane{padding:16px 14px}.panehead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}h2{font-family:'Saira Condensed';font-weight:800;font-size:24px;text-transform:uppercase;color:#E8B33B}.lockcard,.match,.board,.groupbox,.bracketbox,.chartbox{background:#10271A;border:1px solid #ffffff12;border-radius:10px;padding:10px;margin-bottom:9px}.lockname{font-family:'Saira Condensed';font-size:18px;font-weight:800;display:flex;align-items:center}.lockrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.lockteam{font-size:11.5px;background:#0C1F15;border:1px solid #ffffff14;border-radius:999px;padding:4px 9px;display:inline-flex;align-items:center;gap:6px}.lockteam.editing{border-radius:8px;padding:6px 7px}.editdraftbtn{background:#E8B33B;color:#0C1F15;border:0;border-radius:8px;padding:8px 13px;font-weight:800;cursor:pointer;font-size:12px}.draftnameinput{background:#0C1F15;border:1px solid #E8B33B66;border-radius:7px;color:#F0EDE2;padding:6px 8px;font-family:Inter,system-ui,sans-serif;font-size:14px;font-weight:700;min-width:130px}.ownerselect{background:#10271A;border:1px solid #ffffff24;color:#F0EDE2;border-radius:6px;padding:3px 5px;font-size:11px;max-width:110px}.pdot.solo{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;flex:0 0 auto}.syncbar{display:flex;gap:10px;align-items:center;margin:2px 0 10px;flex-wrap:wrap}.syncbtn{background:#E8B33B;color:#0C1F15;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer}.syncbtn:disabled{opacity:.45;cursor:not-allowed;background:#5d665e;color:#C8D8CC}.filterbar{display:flex;align-items:center;gap:8px;margin:0 0 10px;color:#9FBFA8;font-size:12px;flex-wrap:wrap}.filterselect{background:#0C1F15;border:1px solid #ffffff24;color:#F0EDE2;border-radius:8px;padding:8px 10px;font-size:13px;min-width:190px}.filterselect.small{min-width:130px}.filterselect.date{min-width:145px}.clearfilterbtn{background:transparent;border:1px solid #ffffff2a;color:#F0EDE2;border-radius:8px;padding:8px 10px;font-size:12px;cursor:pointer}.matchmeta{display:flex;gap:8px;align-items:center;margin-bottom:7px;flex-wrap:wrap}.grpbadge{font-family:'Saira Condensed';font-size:11px;letter-spacing:.14em;color:#0C1F15;background:#9FBFA8;border-radius:4px;padding:2px 6px}.grpbadge.done{background:#E8B33B}.grpbadge.live{background:#E0635C}.grpbadge.future{background:#9FBFA8}.scoreline{display:flex;align-items:center;gap:8px}.teamcell{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.teamcell.r{text-align:right;align-items:flex-end}.tname{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}.owner{font-size:10.5px;display:inline-flex;align-items:center;gap:5px}.owner .dot{width:6px;height:6px;border-radius:50%}.owner.none{color:#5d7a66}.scorebox.readonly{display:flex;align-items:center;gap:6px;font-family:'Saira Condensed';font-weight:800;font-size:24px;color:#E8B33B}.brow{display:grid;grid-template-columns:24px 1fr 28px 24px 24px 24px 34px 42px 44px;align-items:center;width:100%;padding:11px 10px;background:transparent;border:0;border-bottom:1px solid #ffffff0d;color:#F0EDE2;text-align:left;font-size:12.5px}.brow.bhead{font-size:9px;color:#9FBFA8;text-transform:uppercase}.brow.lead{background:linear-gradient(90deg,#E8B33B22,transparent 70%)}.squad{background:#0C1F15;border-bottom:1px solid #ffffff0d;padding:4px 0}.squadrow{display:flex;justify-content:space-between;padding:6px 14px;font-size:12.5px;color:#C8D8CC}.glabel{font-family:'Saira Condensed';font-weight:800;letter-spacing:.18em;font-size:11px;color:#E8B33B;margin-bottom:6px;text-transform:uppercase}.empty{text-align:center;color:#9FBFA8;padding:18px}.empty.small{padding:8px}.groupsview{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.grow{display:grid;grid-template-columns:1.3fr .9fr 34px 34px;gap:8px;align-items:center;border-left:4px solid transparent;border-bottom:1px solid #ffffff0c;padding:7px 8px;font-size:12px}.grow.ghead{color:#9FBFA8;text-transform:uppercase;font-size:9px;background:transparent;border-left-color:transparent}.out{opacity:.38;filter:grayscale(1)}.chartbox{margin-top:14px}.charthead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.racechart{width:100%;height:auto;display:block;background:#0C1F15;border:1px solid #ffffff10;border-radius:8px}.gridline{stroke:#ffffff14;stroke-width:1}.axisline{stroke:#ffffff2a;stroke-width:1}.axistext{fill:#9FBFA8;font-size:11px;font-family:Inter,system-ui,sans-serif}.axislabel{fill:#9FBFA8;font-size:10px;font-family:Inter,system-ui,sans-serif;letter-spacing:.04em}.chartlegend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:11.5px;color:#C8D8CC}.legenddot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:9999;padding:18px}.modalCard{width:340px;max-width:100%;background:#10271A;border:1px solid #E8B33B66;border-radius:14px;padding:18px;box-shadow:0 18px 60px #0008}.modalCard h3{font-family:'Saira Condensed';font-size:24px;font-weight:800;text-transform:uppercase;color:#E8B33B;margin:0 0 8px}.modalText{font-size:13px;color:#F0EDE2;margin:0 0 12px;line-height:1.35}.modalCard input{width:100%;background:#0C1F15;border:1px solid #ffffff24;border-radius:8px;color:#F0EDE2;padding:10px 11px;font-size:14px}.modalCard input:focus{outline:2px solid #E8B33B;border-color:transparent}.modalError{color:#E0635C;font-size:12px;margin-top:8px}.modalButtons{display:flex;gap:8px;margin-top:12px}.modalButtons button{flex:1;border:0;border-radius:8px;padding:9px 12px;font-weight:800;cursor:pointer}.modalUnlock{background:#E8B33B;color:#0C1F15}.modalCancel{background:transparent;color:#F0EDE2;border:1px solid #ffffff2a!important}.tabbar{position:fixed;bottom:0;left:0;right:0;width:100%;max-width:none;margin:0;display:flex;background:#0A1A11F2;border-top:1px solid #ffffff1a}.tabbar button{flex:1;background:transparent;border:0;color:#9FBFA8;font-family:'Saira Condensed';font-weight:600;letter-spacing:.1em;font-size:12px;text-transform:uppercase;padding:15px 0;cursor:pointer}.tabbar button.on{color:#E8B33B;box-shadow:inset 0 3px 0 #E8B33B}
+*{box-sizing:border-box;margin:0;padding:0}.app{min-height:100vh;background:#0C1F15;color:#F0EDE2;font-family:Inter,system-ui,sans-serif;font-size:14px;padding-bottom:76px;width:100%;max-width:none;margin:0}.hero{padding:26px 18px 18px;border-bottom:1px solid #ffffff14}.eyebrow{font-family:'Saira Condensed';letter-spacing:.22em;font-size:11px;color:#9FBFA8}h1{font-family:'Saira Condensed';font-weight:800;font-size:44px;line-height:.95;margin:6px 0 8px;color:#E8B33B}h1 span{color:#E8B33B}.rules,.subtle,.hintline,.syncmsg,.city{font-size:12px;color:#9FBFA8}.pane{padding:16px 14px}.panehead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}h2{font-family:'Saira Condensed';font-weight:800;font-size:24px;text-transform:uppercase;color:#E8B33B}.lockcard,.match,.board,.groupbox,.bracketbox,.chartbox{background:#10271A;border:1px solid #ffffff12;border-radius:10px;padding:10px;margin-bottom:9px}.lockname{font-family:'Saira Condensed';font-size:18px;font-weight:800;display:flex;align-items:center}.lockrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.lockteam{font-size:11.5px;background:#0C1F15;border:1px solid #ffffff14;border-radius:999px;padding:4px 9px;display:inline-flex;align-items:center;gap:6px}.lockteam.editing{border-radius:8px;padding:6px 7px}.editdraftbtn{background:#E8B33B;color:#0C1F15;border:0;border-radius:8px;padding:8px 13px;font-weight:800;cursor:pointer;font-size:12px}.draftnameinput{background:#0C1F15;border:1px solid #E8B33B66;border-radius:7px;color:#F0EDE2;padding:6px 8px;font-family:Inter,system-ui,sans-serif;font-size:14px;font-weight:700;min-width:130px}.ownerselect{background:#10271A;border:1px solid #ffffff24;color:#F0EDE2;border-radius:6px;padding:3px 5px;font-size:11px;max-width:110px}.pdot.solo{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;flex:0 0 auto}.syncbar{display:flex;gap:10px;align-items:center;margin:2px 0 10px;flex-wrap:wrap}.syncbtn{background:#E8B33B;color:#0C1F15;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer}.syncbtn:disabled{opacity:.45;cursor:not-allowed;background:#5d665e;color:#C8D8CC}.filterbar{display:flex;align-items:center;gap:8px;margin:0 0 10px;color:#9FBFA8;font-size:12px;flex-wrap:wrap}.filterselect{background:#0C1F15;border:1px solid #ffffff24;color:#F0EDE2;border-radius:8px;padding:8px 10px;font-size:13px;min-width:190px}.filterselect.small{min-width:130px}.filterselect.date{min-width:145px}.clearfilterbtn{background:transparent;border:1px solid #ffffff2a;color:#F0EDE2;border-radius:8px;padding:8px 10px;font-size:12px;cursor:pointer}.matchmeta{display:flex;gap:8px;align-items:center;margin-bottom:7px;flex-wrap:wrap}.grpbadge{font-family:'Saira Condensed';font-size:11px;letter-spacing:.14em;color:#0C1F15;background:#9FBFA8;border-radius:4px;padding:2px 6px}.grpbadge.done{background:#E8B33B}.grpbadge.live{background:#E0635C}.grpbadge.future{background:#9FBFA8}.scoreline{display:flex;align-items:center;gap:8px}.teamcell{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.teamcell.r{text-align:right;align-items:flex-end}.tname{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}.owner{font-size:10.5px;display:inline-flex;align-items:center;gap:5px}.owner .dot{width:6px;height:6px;border-radius:50%}.owner.none{color:#5d7a66}.scorebox.readonly{display:flex;align-items:center;gap:6px;font-family:'Saira Condensed';font-weight:800;font-size:24px;color:#E8B33B}.brow{display:grid;grid-template-columns:24px 1fr 28px 24px 24px 24px 34px 42px 44px;align-items:center;width:100%;padding:11px 10px;background:transparent;border:0;border-bottom:1px solid #ffffff0d;color:#F0EDE2;text-align:left;font-size:12.5px}.brow.bhead{font-size:9px;color:#9FBFA8;text-transform:uppercase}.brow.lead{background:linear-gradient(90deg,#E8B33B22,transparent 70%)}.squad{background:#0C1F15;border-bottom:1px solid #ffffff0d;padding:4px 0}.squadrow{display:flex;justify-content:space-between;padding:6px 14px;font-size:12.5px;color:#C8D8CC}.glabel{font-family:'Saira Condensed';font-weight:800;letter-spacing:.18em;font-size:11px;color:#E8B33B;margin-bottom:6px;text-transform:uppercase}.empty{text-align:center;color:#9FBFA8;padding:18px}.empty.small{padding:8px}.groupsview{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.grow{display:grid;grid-template-columns:1.3fr .9fr 34px 34px;gap:8px;align-items:center;border-left:4px solid transparent;border-bottom:1px solid #ffffff0c;padding:7px 8px;font-size:12px}.grow.ghead{color:#9FBFA8;text-transform:uppercase;font-size:9px;background:transparent;border-left-color:transparent}.out{opacity:.38;filter:grayscale(1)}.chartbox{margin-top:14px}.charthead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.racechart{width:100%;height:auto;display:block;background:#0C1F15;border:1px solid #ffffff10;border-radius:8px}.gridline{stroke:#ffffff14;stroke-width:1}.axisline{stroke:#ffffff2a;stroke-width:1}.axistext{fill:#9FBFA8;font-size:11px;font-family:Inter,system-ui,sans-serif}.axislabel{fill:#9FBFA8;font-size:10px;font-family:Inter,system-ui,sans-serif;letter-spacing:.04em}.chartlegend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:11.5px;color:#C8D8CC}.legenddot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:9999;padding:18px}.modalCard{width:340px;max-width:100%;background:#10271A;border:1px solid #E8B33B66;border-radius:14px;padding:18px;box-shadow:0 18px 60px #0008}.modalCard h3{font-family:'Saira Condensed';font-size:24px;font-weight:800;text-transform:uppercase;color:#E8B33B;margin:0 0 8px}.modalText{font-size:13px;color:#F0EDE2;margin:0 0 12px;line-height:1.35}.modalCard input{width:100%;background:#0C1F15;border:1px solid #ffffff24;border-radius:8px;color:#F0EDE2;padding:10px 11px;font-size:14px}.modalCard input:focus{outline:2px solid #E8B33B;border-color:transparent}.modalError{color:#E0635C;font-size:12px;margin-top:8px}.modalButtons{display:flex;gap:8px;margin-top:12px}.modalButtons button{flex:1;border:0;border-radius:8px;padding:9px 12px;font-weight:800;cursor:pointer}.modalUnlock{background:#E8B33B;color:#0C1F15}.modalCancel{background:transparent;color:#F0EDE2;border:1px solid #ffffff2a!important}.tabbar{position:fixed;bottom:0;left:0;right:0;width:100%;max-width:none;margin:0;display:flex;background:#0A1A11F2;border-top:1px solid #ffffff1a}.tabbar button{flex:1;background:transparent;border:0;color:#9FBFA8;font-family:'Saira Condensed';font-weight:600;letter-spacing:.1em;font-size:12px;text-transform:uppercase;padding:15px 0;cursor:pointer}.tabbar button.on{color:#E8B33B;box-shadow:inset 0 3px 0 #E8B33B}.tableintro{margin:-5px 0 10px}.statcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}.statcard,.rivalcard,.teamstatcard,.pathcard,.heatgroup{background:#0C1F15;border:1px solid #ffffff12;border-radius:10px;padding:10px}.statcard{display:flex;flex-direction:column;gap:4px}.statcard b{font-size:16px;color:#F0EDE2}.statcard span,.rivalcard span,.rivalcard em,.teamstatcard span,.teamstatcard small,.pathcard span,.heatteam small{font-size:12px;color:#9FBFA8}.rivalgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}.rivalcard{display:flex;flex-direction:column;gap:3px}.rivalcard em{font-style:normal;color:#E8B33B}.dotsgrid{display:flex;flex-direction:column;gap:8px}.dotrow{display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center}.dotlabel{font-size:12px;font-weight:700}.dotsline{display:flex;flex-wrap:wrap;gap:4px}.outcomedot{width:10px;height:10px;border-radius:50%;display:inline-block;background:#73796f}.outcomedot.w{background:#31c46b}.outcomedot.d{background:#e8a23b}.outcomedot.l{background:#df5548}.outcomedot.future{background:#68736b}.heatmapgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:8px}.heatgroup{display:flex;flex-direction:column;gap:6px}.heatgroup b{font-family:'Saira Condensed';color:#E8B33B;letter-spacing:.08em}.heatteam{border:1px solid #ffffff22;border-radius:8px;padding:6px 7px;display:flex;justify-content:space-between;gap:6px;font-size:12px}.pathgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}.pathcard{border-left:4px solid #ffffff22}.pathcard b{display:block;margin-bottom:2px}.pathsteps{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.pathsteps span{border:1px solid #ffffff18;border-radius:999px;padding:3px 7px;background:#10271A}.qualrow,.grow.qualrow{grid-template-columns:1.2fr .8fr 34px 34px 58px}.grow{grid-template-columns:1.2fr .8fr 34px 34px 58px}.qualpill{font-size:10px;border-radius:999px;padding:3px 6px;text-align:center;background:#5d665e;color:#F0EDE2}.qualpill.alive{background:#2f7d4f}.qualpill.out{background:#6b403c}.teamstatgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.teamstatcard{display:flex;flex-direction:column;gap:4px}.teamstatcard b{font-size:14px}.tabbar button{font-size:11px}@media(max-width:560px){.dotrow{grid-template-columns:1fr}.grow{grid-template-columns:1.1fr .8fr 30px 30px 54px}.brow{grid-template-columns:22px 1fr 25px 22px 22px 22px 30px 36px 38px;font-size:11px}}
+
 `;
