@@ -273,13 +273,15 @@ function matchupWinProbability(teamCode, opponentCode) {
 
 function percentageText(value) {
   if (!Number.isFinite(value)) return "0.0%";
-  if (value > 0 && value < 0.1) return "<0.1%";
-  return `${value.toFixed(1)}%`;
+  const capped = Math.min(99.9, Math.max(0, value));
+  if (capped > 0 && capped < 0.1) return "<0.1%";
+  return `${capped.toFixed(1)}%`;
 }
 
 function percentageText2(value) {
   if (!Number.isFinite(value)) return "0.00%";
-  return `${value.toFixed(2)}%`;
+  const capped = Math.min(99.99, Math.max(0, value));
+  return `${capped.toFixed(2)}%`;
 }
 
 const TEAM_IDS = Object.keys(TEAMS);
@@ -714,9 +716,9 @@ export default function App() {
       const pointsRate = gamesPlayed ? t.pts / (gamesPlayed * 3) : 0.34;
       const gdRate = gamesPlayed ? t.gd / gamesPlayed : 0;
       const performanceModifier = clamp(
-        1 + (pointsRate - 0.34) * 0.35 + gdRate * 0.035,
-        0.76,
-        1.28,
+        1 + (pointsRate - 0.34) * 0.18 + gdRate * 0.018,
+        0.90,
+        1.10,
       );
       const luckModifier = seededLuckFactor(tid);
 
@@ -742,9 +744,9 @@ export default function App() {
     const weightedRows = rawRows.map((r) => {
       if (!r.baseChance || r.pathPower <= 0) return r;
 
-      const pathModifier = clamp(r.pathPower / avgPathPower, 0.55, 1.65);
+      const pathModifier = clamp(r.pathPower / avgPathPower, 0.65, 1.45);
       const combinedModifier =
-        0.60 +
+        1 * 0.60 +
         pathModifier * 0.25 +
         r.performanceModifier * 0.10 +
         r.luckModifier * 0.05;
@@ -1464,12 +1466,13 @@ export default function App() {
         <div className="charthead">
           <div>
             <div className="glabel">COUNTRY PERFORMANCE</div>
-            <div className="subtle">Country World Cup chances start from your baseline odds, then adjust for path difficulty, tournament performance and a small luck factor</div>
+            <div className="subtle">Country World Cup chances start from your baseline odds and adjust mainly for FIFA/path strength, with only a small live performance adjustment</div>
           </div>
         </div>
         <div className="rankinglist compact performance">
           <div className="rankingrow rankinghead countryperfhead">
             <span>Team</span>
+            <span>FIFA</span>
             <span>Pts</span>
             <span>GD</span>
             <span>Chance</span>
@@ -1482,6 +1485,7 @@ export default function App() {
               style={row.owner ? { borderLeftColor: row.owner.color, background: `${row.owner.color}18` } : undefined}
             >
               <span className="rankteam">{TEAMS[row.tid][1]} {TEAMS[row.tid][0]}</span>
+              <span>#{row.rank === 999 ? "—" : row.rank}</span>
               <span>{row.pts}</span>
               <span>{gdText(row.gd)}</span>
               <b>{percentageText(row.chance)}</b>
@@ -1600,8 +1604,7 @@ export default function App() {
         {trophyChances.map((p) => (
           <div
             key={p.id}
-            className="trophyrow compact managerchance"
-            style={{ borderLeftColor: PLAYER_COLORS[p.id], background: `${PLAYER_COLORS[p.id]}18` }}
+            className={`trophyrow compact managerchance ${p.chance >= 20 ? "chance-high" : p.chance >= 12 ? "chance-mid" : "chance-low"}`}
           >
             <ManagerPill player={p} small />
             <div className="trophybar"><i style={{ width: `${Math.max(3, p.chance)}%`, background: PLAYER_COLORS[p.id] }} /></div>
@@ -2134,4 +2137,21 @@ const CSS = `
 
 /* Final probability and mobile polish */
 .managerpill{border:0!important;min-width:72px;max-width:72px;text-align:center;justify-content:center}.managerpill.small{min-width:58px;max-width:58px}.teamcell .managerpill{min-width:76px;max-width:76px}.trophyrow .managerpill{min-width:58px;max-width:58px}.brow{border-left:4px solid transparent}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:64px minmax(52px,.8fr) 58px 58px}.trophyrow.managerchance{border-left:4px solid transparent}.trophyrow.trophyhead span:nth-child(3),.trophyrow.trophyhead span:nth-child(4){text-align:center}.trophyrow.compact b,.trophyrow.compact>span:last-child{text-align:center}.managerResultPill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 8px;max-width:100%;overflow:hidden;white-space:nowrap}.dotrow{grid-template-columns:1fr}.dotlabel{min-width:0}.managerResultPill .dotsline{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}.rankinglist.performance{display:flex;flex-direction:column;gap:5px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(125px,1fr) 34px 38px 58px 64px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(120px,1fr) 46px 34px 38px 62px}.countryperfrow,.mystatcountryrow{border-left:4px solid transparent}.mystatcountryrow.rag-green{border-left-color:#31c46b;background:#31c46b16}.mystatcountryrow.rag-red{border-left-color:#df5548;background:#df554816}.rankingrow b{color:#E8B33B}.rag-green{border-left-color:#31c46b}.rag-red{border-left-color:#df5548}.managerpill{color:#F0EDE2}@media(max-width:560px){.managerpill{min-width:62px;max-width:62px;font-size:9.5px}.managerpill.small{min-width:52px;max-width:52px}.teamcell .managerpill{min-width:64px;max-width:64px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:56px minmax(44px,.7fr) 52px 50px}.countryperfhead,.countryperfrow{grid-template-columns:minmax(104px,1fr) 28px 32px 52px 54px;font-size:10px}.mystatcountryhead,.mystatcountryrow{grid-template-columns:minmax(98px,1fr) 40px 28px 34px 54px;font-size:10px}.managerResultPill{border-radius:999px;align-items:center;flex-direction:row;gap:6px;width:auto;max-width:100%}.managerResultPill .dotsline{gap:3px}}
+/* Final probability and table polish */
+.managerpill{border:0!important;box-shadow:none!important;outline:none!important;}
+.trophyrow .managerpill{min-width:50px!important;max-width:50px!important;padding-left:4px!important;padding-right:4px!important;}
+.teamcell .managerpill{min-width:64px!important;max-width:64px!important;}
+.trophyrow.managerchance{border-left:4px solid transparent;}
+.trophyrow.managerchance.chance-high{border-left-color:#31c46b!important;background:rgba(49,196,107,.12)!important;}
+.trophyrow.managerchance.chance-mid{border-left-color:#e8a23b!important;background:rgba(232,162,59,.12)!important;}
+.trophyrow.managerchance.chance-low{border-left-color:#df5548!important;background:rgba(223,85,72,.12)!important;}
+.countryperfhead,.countryperfrow{grid-template-columns:minmax(118px,1fr) 42px 30px 34px 56px 58px!important;}
+.countryperfrow b{color:#E8B33B;}
+.trophyrow.trophyhead span:nth-child(3),.trophyrow.trophyhead span:nth-child(4){text-align:center;}
+@media(max-width:560px){
+  .trophyrow .managerpill{min-width:46px!important;max-width:46px!important;font-size:9px!important;}
+  .teamcell .managerpill{min-width:58px!important;max-width:58px!important;}
+  .countryperfhead,.countryperfrow{grid-template-columns:minmax(90px,1fr) 34px 26px 30px 46px 46px!important;font-size:9.5px!important;}
+}
+
 `;
