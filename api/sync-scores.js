@@ -15,8 +15,8 @@ const TEAM_ALIASES = {
   Switzerland: "SUI",
   Qatar: "QAT",
   "Bosnia and Herzegovina": "BIH",
-  "Bosnia and Herzegovina": "BIH",
-  "Bosnia": "BIH",
+  "Bosnia & Herzegovina": "BIH",
+  Bosnia: "BIH",
   Brazil: "BRA",
   Morocco: "MAR",
   Scotland: "SCO",
@@ -310,8 +310,9 @@ function makeBaseFixtures() {
 export default async function handler(req, res) {
   try {
     const now = Date.now();
+    const debugMode = req.query?.debug === "1" || req.query?.debug === "true";
 
-    if (cachedResponse && now - cachedAt < CACHE_MS) {
+    if (!debugMode && cachedResponse && now - cachedAt < CACHE_MS) {
       return res.status(200).json({
         ...cachedResponse,
         meta: {
@@ -339,6 +340,10 @@ export default async function handler(req, res) {
 
     const dates = datesBetween("2026-06-11", "2026-07-19");
     const debug = [];
+    const apiMatched = [];
+    const apiUnmapped = [];
+    let apiMatchesSeen = 0;
+    let apiMatchesMerged = 0;
 
     for (const date of dates) {
       const apiRes = await fetch(
@@ -355,6 +360,8 @@ export default async function handler(req, res) {
           date,
           ok: false,
           status: apiRes.status,
+          count: 0,
+          sample: [],
         });
         continue;
       }
@@ -362,10 +369,23 @@ export default async function handler(req, res) {
       const data = await apiRes.json();
       const fixtures = data.response || [];
 
+      const sample = fixtures.slice(0, 30).map((f) => ({
+        league: f.league?.name,
+        round: f.league?.round,
+        country: f.league?.country,
+        home: f.teams?.home?.name,
+        away: f.teams?.away?.name,
+        status: f.fixture?.status?.short,
+        goals: f.goals,
+        homeCode: teamCode(f.teams?.home?.name),
+        awayCode: teamCode(f.teams?.away?.name),
+      }));
+
       debug.push({
         date,
         ok: true,
         count: fixtures.length,
+        sample,
       });
 
       for (const m of fixtures) {
@@ -375,7 +395,24 @@ export default async function handler(req, res) {
         const homeCode = teamCode(homeName);
         const awayCode = teamCode(awayName);
 
-        if (!homeCode || !awayCode) continue;
+        if (!homeCode || !awayCode) {
+          if (apiUnmapped.length < 100) {
+            apiUnmapped.push({
+              date,
+              league: m.league?.name,
+              round: m.league?.round,
+              home: homeName,
+              away: awayName,
+              homeCode,
+              awayCode,
+              status: m.fixture?.status?.short,
+              goals: m.goals,
+            });
+          }
+          continue;
+        }
+
+        apiMatchesSeen++;
 
         const key = makePairKey(homeCode, awayCode);
         if (!key) continue;
@@ -386,20 +423,15 @@ export default async function handler(req, res) {
           id: m.fixture?.id || key,
           date: m.fixture?.date || date + "T12:00:00Z",
           status,
-          round:
-            m.league?.round ||
-            byKey.get(key)?.round ||
-            "World Cup",
+          round: m.league?.round || byKey.get(key)?.round || "World Cup",
           league: m.league?.name || "FIFA World Cup",
           country: m.league?.country || "World",
           homeName,
           awayName,
           homeCode,
           awayCode,
-          homeGoals:
-            typeof m.goals?.home === "number" ? m.goals.home : null,
-          awayGoals:
-            typeof m.goals?.away === "number" ? m.goals.away : null,
+          homeGoals: typeof m.goals?.home === "number" ? m.goals.home : null,
+          awayGoals: typeof m.goals?.away === "number" ? m.goals.away : null,
           isFinished: ["FT", "AET", "PEN"].includes(status),
           isScheduled: ["NS", "TBD"].includes(status),
           isLive: ["1H", "HT", "2H", "ET", "P", "LIVE"].includes(status),
@@ -411,8 +443,37 @@ export default async function handler(req, res) {
             ...byKey.get(key),
             ...merged,
           });
+          apiMatchesMerged++;
+
+          if (apiMatched.length < 100) {
+            apiMatched.push({
+              date,
+              key,
+              home: homeName,
+              away: awayName,
+              homeCode,
+              awayCode,
+              status,
+              goals: m.goals,
+              source: "merged",
+            });
+          }
         } else {
           byKey.set(`api-${m.fixture?.id || key}`, merged);
+
+          if (apiMatched.length < 100) {
+            apiMatched.push({
+              date,
+              key,
+              home: homeName,
+              away: awayName,
+              homeCode,
+              awayCode,
+              status,
+              goals: m.goals,
+              source: "api-extra",
+            });
+          }
         }
       }
     }
@@ -424,10 +485,14 @@ export default async function handler(req, res) {
     const response = {
       matches,
       meta: {
-        source: "DEBUG-LATEST-MERGE-V3",
+        source: "DEBUG-LATEST-MERGE-V4-1",
         cached: false,
         checkedAt: new Date().toISOString(),
         count: matches.length,
+        apiMatchesSeen,
+        apiMatchesMerged,
+        apiMatched,
+        apiUnmapped,
         debug,
       },
     };
