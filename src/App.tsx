@@ -1929,13 +1929,7 @@ export default function App() {
             <button className="syncbtn" onClick={runSync} disabled={!canRefresh}>
               {refreshButtonText}
             </button>
-            <label className="togglelabel">
-              <span>Compact</span>
-              <span className={`toggleswitch ${compactResults ? "on" : ""}`} onClick={() => setCompactResults((v) => !v)} role="switch" aria-checked={compactResults}>
-                <span className="toggleknob" />
-              </span>
-            </label>
-            <span className="syncmsg">
+            <span className="syncmsg" style={{ flex: 1 }}>
               {syncMsg ||
                 (!canRefresh
                   ? `Next refresh in ${refreshMinutesLeft}m`
@@ -1943,49 +1937,34 @@ export default function App() {
                   ? "Last check " + fmtDateTime(state.lastSync)
                   : "Tap update to fetch scores")}
             </span>
+            <label className="togglelabel">
+              <span>Compact</span>
+              <span className={`toggleswitch ${compactResults ? "on" : ""}`} onClick={() => setCompactResults((v) => !v)} role="switch" aria-checked={compactResults}>
+                <span className="toggleknob" />
+              </span>
+            </label>
           </div>
-          <div className="filtercollapse">
-            <button className="clearfilterbtn filtertoggle" onClick={() => setFiltersOpen(!filtersOpen)}>
-              {filtersOpen ? "Hide filters" : "Show filters"}
-            </button>
-            <button
-              className={`clearfilterbtn todaybtn ${resultDateFilter === localDateKey(new Date()) ? "on" : ""}`}
-              onClick={() => {
-                const today = localDateKey(new Date());
-                setResultDateFilter(resultDateFilter === today ? "" : today);
-              }}
-            >
-              Today
-            </button>
-            <div className="statusfiltergroup">
-              <button
-                className={`statusbtn ${resultStatusFilter === "finished" ? "on" : ""}`}
-                onClick={() => setResultStatusFilter(resultStatusFilter === "finished" ? "all" : "finished")}
-              >Done</button>
-              <button
-                className={`statusbtn ${resultStatusFilter === "live" ? "on" : ""}`}
-                onClick={() => setResultStatusFilter(resultStatusFilter === "live" ? "all" : "live")}
-              >Live</button>
-              <button
-                className={`statusbtn ${resultStatusFilter === "future" ? "on" : ""}`}
-                onClick={() => setResultStatusFilter(resultStatusFilter === "future" ? "all" : "future")}
-              >Upcoming</button>
-            </div>
-            {(resultFilter !== "all" || resultGroupFilter !== "all" || resultDateFilter || resultCountryFilter !== "all" || resultStatusFilter !== "all") && (
-              <button
-                className="clearfilterbtn"
-                onClick={() => {
-                  setResultFilter("all");
-                  setResultGroupFilter("all");
-                  setResultDateFilter("");
-                  setResultCountryFilter("all");
-                  setResultStatusFilter("all");
-                }}
-              >
-                Clear filters
-              </button>
-            )}
-          </div>
+          {(() => {
+            const hasActive = resultFilter !== "all" || resultGroupFilter !== "all" || resultDateFilter || resultCountryFilter !== "all" || resultStatusFilter !== "all";
+            const clearAll = () => { setResultFilter("all"); setResultGroupFilter("all"); setResultDateFilter(""); setResultCountryFilter("all"); setResultStatusFilter("all"); };
+            const today = localDateKey(new Date());
+            return (
+              <>
+                <div className="filterrow" style={{ gridTemplateColumns: hasActive ? "1fr 1fr" : "1fr" }}>
+                  <button className="clearfilterbtn" onClick={() => setFiltersOpen(!filtersOpen)}>
+                    {filtersOpen ? "Hide filters" : "Show filters"}
+                  </button>
+                  {hasActive && <button className="clearfilterbtn" onClick={clearAll}>Clear filters</button>}
+                </div>
+                <div className="filterrow filterrow-status">
+                  <button className={`statusbtn ${resultDateFilter === today ? "on" : ""}`} onClick={() => setResultDateFilter(resultDateFilter === today ? "" : today)}>Today</button>
+                  <button className={`statusbtn ${resultStatusFilter === "finished" ? "on" : ""}`} onClick={() => setResultStatusFilter(resultStatusFilter === "finished" ? "all" : "finished")}>Done</button>
+                  <button className={`statusbtn ${resultStatusFilter === "live" ? "on" : ""}`} onClick={() => setResultStatusFilter(resultStatusFilter === "live" ? "all" : "live")}>Live</button>
+                  <button className={`statusbtn ${resultStatusFilter === "future" ? "on" : ""}`} onClick={() => setResultStatusFilter(resultStatusFilter === "future" ? "all" : "future")}>Upcoming</button>
+                </div>
+              </>
+            );
+          })()}
           {filtersOpen && (
             <div className="filterpanel">
               <label htmlFor="resultsFilter">Manager</label>
@@ -2223,10 +2202,12 @@ const CSS = `
 
 .charthead{margin-left:0!important;padding-left:0!important}.glabel{margin-left:0!important;padding-left:0!important}
 
-.statusfiltergroup{display:inline-flex;gap:0;border:1px solid #ffffff24;border-radius:8px;overflow:hidden;flex-shrink:0}
-.statusbtn{background:transparent;border:0;border-right:1px solid #ffffff18;color:#9FBFA8;font-size:11px;padding:6px 9px;cursor:pointer;white-space:nowrap}
+.filterrow{display:grid;gap:6px;margin-bottom:6px}
+.filterrow-status{grid-template-columns:repeat(4,1fr);border:1px solid #ffffff24;border-radius:8px;overflow:hidden}
+.statusbtn{background:transparent;border:0;border-right:1px solid #ffffff18;color:#9FBFA8;font-size:11px;padding:8px 4px;cursor:pointer;white-space:nowrap;width:100%;text-align:center}
 .statusbtn:last-child{border-right:0}
 .statusbtn.on{background:#E8B33B;color:#0C1F15;font-weight:800}
+.syncbar .syncmsg{min-width:0}
 
 .togglelabel{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#9FBFA8;cursor:pointer;user-select:none;padding:4px 0}
 .toggleswitch{display:inline-block;width:40px;height:22px;background:#2a3d32;border-radius:999px;position:relative;transition:background .2s;cursor:pointer;flex-shrink:0}
