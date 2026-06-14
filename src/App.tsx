@@ -10,7 +10,7 @@ const TEAMS = {
   CAN: ["Canada", "🇨🇦", "B"],
   SUI: ["Switzerland", "🇨🇭", "B"],
   QAT: ["Qatar", "🇶🇦", "B"],
-  BIH: ["Bosnia & Herz.", "🇧🇦", "B"],
+  BIH: ["Bosnia", "🇧🇦", "B"],
   BRA: ["Brazil", "🇧🇷", "C"],
   MAR: ["Morocco", "🇲🇦", "C"],
   SCO: ["Scotland", "🏴", "C"],
@@ -596,6 +596,18 @@ export default function App() {
       ]),
     );
   }, [tournamentData]);
+
+  const expectedRemainingPointsForTeam = (tid) => {
+    return state.apiMatches.reduce((sum, m) => {
+      if (!m.homeCode || !m.awayCode || isFinished(m)) return sum;
+      if (m.homeCode === tid) return sum + expectedPointsFromRanks(m.homeCode, m.awayCode);
+      if (m.awayCode === tid) return sum + expectedPointsFromRanks(m.awayCode, m.homeCode);
+      return sum;
+    }, 0);
+  };
+
+  const baseOddsForTeam = (tid) => BASE_WORLD_CUP_ODDS[tid] ?? 0.01;
+  const oddsChangeForTeam = (tid) => (countryOddsByTeam[tid] || 0) - baseOddsForTeam(tid);
 
   const board = useMemo(() => {
     const rows = state.players.map((p) => ({
@@ -1347,6 +1359,7 @@ export default function App() {
             <span>No.</span>
             <span>Team</span>
             <span>FIFA</span>
+            <span>Base</span>
             <span>Owner</span>
           </div>
           {ranked.map((tid, idx) => {
@@ -1360,6 +1373,7 @@ export default function App() {
                 <span className="ranknum">{idx + 1}</span>
                 <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
                 <span className="rankfifa">#{FIFA_RANKINGS[tid] || "—"}</span>
+                <span>{baseOddsForTeam(tid).toFixed(2)}%</span>
                 <span className="rankowner">{owner ? <ManagerPill player={owner} small /> : "—"}</span>
               </div>
             );
@@ -1509,6 +1523,9 @@ export default function App() {
         alive,
         owner: ownerOf(tid),
         odds: countryOddsByTeam[tid] || 0,
+        baseOdds: baseOddsForTeam(tid),
+        oddsChange: oddsChangeForTeam(tid),
+        expPts: expectedRemainingPointsForTeam(tid),
       };
     }).sort(
       (a, b) =>
@@ -1532,9 +1549,12 @@ export default function App() {
             <span>Manager</span>
             <span>Pts</span>
             <span>GD</span>
+            <span>Exp</span>
+            <span>Base</span>
             <span>Odds</span>
+            <span>Chg</span>
           </div>
-          {rows.map(({ tid, stats, owner, odds, alive }) => (
+          {rows.map(({ tid, stats, owner, odds, baseOdds, oddsChange, expPts, alive }) => (
             <div
               key={tid}
               className={`rankingrow countryperfrow ${alive ? "" : "out"}`}
@@ -1544,7 +1564,10 @@ export default function App() {
               <span className="plainowner">{owner ? owner.name : "—"}</span>
               <b>{stats.pts}</b>
               <span>{gdText(stats.gd)}</span>
+              <span>{expPts.toFixed(1)}</span>
+              <span>{baseOdds.toFixed(2)}%</span>
               <b>{odds.toFixed(2)}%</b>
+              <span className={oddsChange >= 0 ? "goodtext" : "badtext"}>{oddsChange >= 0 ? "+" : ""}{oddsChange.toFixed(2)}%</span>
             </div>
           ))}
         </div>
@@ -1609,7 +1632,10 @@ export default function App() {
               <span>FIFA</span>
               <span>Pts</span>
               <span>GD</span>
+              <span>Exp</span>
+              <span>Base</span>
               <span>Odds</span>
+              <span>Chg</span>
             </div>
             {teams
               .slice()
@@ -1618,6 +1644,9 @@ export default function App() {
                 const t = tournamentData.teamStats[tid];
                 const alive = tournamentData.alive.has(tid);
                 const odds = countryOddsByTeam[tid] || 0;
+                const baseOdds = baseOddsForTeam(tid);
+                const oddsChange = oddsChangeForTeam(tid);
+                const expPts = expectedRemainingPointsForTeam(tid);
                 return (
                   <div
                     key={tid}
@@ -1628,7 +1657,10 @@ export default function App() {
                     <span>#{FIFA_RANKINGS[tid] || "—"}</span>
                     <b>{t.pts}</b>
                     <span>{gdText(t.gd)}</span>
+                    <span>{expPts.toFixed(1)}</span>
+                    <span>{baseOdds.toFixed(2)}%</span>
                     <b>{odds.toFixed(2)}%</b>
+                    <span className={oddsChange >= 0 ? "goodtext" : "badtext"}>{oddsChange >= 0 ? "+" : ""}{oddsChange.toFixed(2)}%</span>
                   </div>
                 );
               })}
@@ -1660,7 +1692,7 @@ export default function App() {
                     <span className="opponentchips">
                       {opponents.length ? opponents.map((o, i) => (
                         <em key={i} className={`oppchip ${o.result}`}>
-                          {TEAMS[o.opp]?.[1] || "🏳️"} {nameFor(o.opp)} <b>{o.label}</b>
+                          {TEAMS[o.opp]?.[1] || "🏳️"} {nameFor(o.opp)}
                         </em>
                       )) : <em className="oppchip future">None loaded</em>}
                     </span>
@@ -2099,5 +2131,12 @@ const CSS = `
 
 /* compact country/team tables + expected points column */
 .leaguegrow{grid-template-columns:24px minmax(86px,1.2fr) 30px 26px 26px 26px 36px 42px 38px 42px!important}.leaguegrow .exppts{color:#C8D8CC;font-weight:700;opacity:.78}.countryperfrow{grid-template-columns:minmax(118px,1.35fr) minmax(62px,.75fr) 34px 38px 54px!important;gap:6px!important;padding:6px 7px!important;font-size:11.5px!important}.countryperfrow .plainowner{font-weight:800;color:#F0EDE2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.countryperfrow b:last-child{font-family:'Saira Condensed';font-size:16px;color:#E8B33B}.mysteamrow{grid-template-columns:minmax(116px,1.35fr) 44px 34px 38px 58px!important;gap:6px!important;padding:7px 8px!important;font-size:11.5px!important;border-left:4px solid transparent}.mysteamrow b:last-child{font-family:'Saira Condensed';font-size:16px;color:#E8B33B}.mysteamtable .rankinghead,.countryperf .rankinghead{background:transparent!important;color:#9FBFA8!important;text-transform:uppercase;font-size:9px!important;letter-spacing:.08em!important;border-left-color:transparent!important}@media(max-width:560px){.leaguegrow{grid-template-columns:20px minmax(70px,1.05fr) 23px 20px 20px 20px 28px 31px 30px 32px!important;gap:3px!important;padding:7px 4px!important;font-size:9.8px!important}.leaguegrow.leaguehead{font-size:7.5px!important}.countryperfrow{grid-template-columns:minmax(98px,1.3fr) minmax(52px,.65fr) 28px 31px 46px!important;gap:4px!important;padding:5px 5px!important;font-size:10px!important}.countryperfrow b:last-child{font-size:13px!important}.mysteamrow{grid-template-columns:minmax(94px,1.3fr) 36px 26px 31px 46px!important;gap:4px!important;padding:6px 5px!important;font-size:10px!important}.mysteamrow b:last-child{font-size:13px!important}}
+
+.countryperfrow{grid-template-columns:minmax(90px,1.2fr) minmax(58px,.75fr) 32px 34px 38px 48px 48px 44px!important}
+.mysteamrow{grid-template-columns:minmax(94px,1.25fr) 38px 30px 34px 38px 48px 48px 44px!important}
+.rankinglist.compact>.rankingrow:not(.countryperfrow):not(.mysteamrow):not(.opponentrow){grid-template-columns:34px minmax(104px,1.25fr) 44px 50px minmax(70px,.8fr)}
+.goodtext{color:#31c46b!important;font-weight:800}.badtext{color:#df5548!important;font-weight:800}
+.oppchip b{display:none!important}
+@media(max-width:560px){.countryperfrow{grid-template-columns:minmax(80px,1.1fr) 42px 26px 30px 34px 40px 42px 36px!important;font-size:9.5px!important}.mysteamrow{grid-template-columns:minmax(76px,1.1fr) 32px 26px 28px 32px 38px 40px 36px!important;font-size:9.5px!important}.rankinglist.compact>.rankingrow:not(.countryperfrow):not(.mysteamrow):not(.opponentrow){grid-template-columns:28px minmax(88px,1.1fr) 36px 42px minmax(54px,.7fr);font-size:9.5px!important}.rankowner .managerpill{font-size:8.5px!important;padding:2px 4px!important}.oppchip{font-size:9.5px!important;padding:4px 6px!important}}
 
 `;
