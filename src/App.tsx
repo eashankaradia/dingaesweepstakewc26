@@ -242,16 +242,15 @@ function fifaRankScore(tid) {
   return Math.max(1, 212 - rank);
 }
 
-function expectedPointsFromRanks(teamCode, opponentCode) {
-  const teamStrength = fifaRankScore(teamCode);
-  const opponentStrength = fifaRankScore(opponentCode);
-  const diff = teamStrength - opponentStrength;
-
-  // Lightweight prediction model: stronger FIFA-ranked teams get more expected points,
-  // but draws remain possible so underdogs are not treated as zero.
+function matchOutcomeProbabilities(homeCode, awayCode) {
+  const diff = fifaRankScore(homeCode) - fifaRankScore(awayCode);
   const winProb = Math.max(0.12, Math.min(0.78, 0.45 + diff / 320));
   const drawProb = Math.max(0.16, Math.min(0.32, 0.26 - Math.abs(diff) / 1000));
+  return { winProb, drawProb, lossProb: 1 - winProb - drawProb };
+}
 
+function expectedPointsFromRanks(teamCode, opponentCode) {
+  const { winProb, drawProb } = matchOutcomeProbabilities(teamCode, opponentCode);
   return winProb * 3 + drawProb;
 }
 
@@ -693,69 +692,66 @@ export default function App() {
   }, [state.players, state.ownership, state.apiMatches, tournamentData.alive]);
 
   const trophyChances = useMemo(() => {
-    const futureMatches = state.apiMatches.filter(
-      (m) =>
-        m.homeCode &&
-        m.awayCode &&
-        !isFinished(m) &&
-        tournamentData.alive.has(m.homeCode) &&
-        tournamentData.alive.has(m.awayCode),
+    const N = 2000;
+    const remainingMatches = state.apiMatches.filter(
+      (m) => m.homeCode && m.awayCode && !isFinished(m),
     );
 
-    const scores = board.map((p) => {
-      const ownedTeams = Object.keys(p.teams || {});
-      const aliveTeams = ownedTeams.filter((tid) => tournamentData.alive.has(tid));
-      const aliveRanks = aliveTeams
-        .map((tid) => FIFA_RANKINGS[tid] || 211)
-        .sort((a, b) => a - b);
+    // Monte Carlo: simulate the rest of the tournament N times and count wins
+    const winCounts: Record<string, number> = {};
+    board.forEach((p) => { winCounts[p.id] = 0; });
 
-      const avgRank = aliveRanks.length
-        ? Math.round(aliveRanks.reduce((sum, r) => sum + r, 0) / aliveRanks.length)
-        : null;
-      const bestRank = aliveRanks.length ? aliveRanks[0] : null;
+    for (let sim = 0; sim < N; sim++) {
+      const simPts: Record<string, number> = {};
+      board.forEach((p) => { simPts[p.id] = p.pts; });
 
-      const rankingStrength = aliveTeams.reduce(
-        (sum, tid) => sum + teamChanceQuality(tid, tournamentData.alive),
-        0,
-      );
+      for (const m of remainingMatches) {
+        const homeOwner = state.ownership[m.homeCode];
+        const awayOwner = state.ownership[m.awayCode];
+        if (homeOwner == null && awayOwner == null) continue;
 
-      const projectedFixturePoints = futureMatches.reduce((sum, m) => {
-        if (state.ownership[m.homeCode] === p.id) {
-          return sum + expectedPointsFromRanks(m.homeCode, m.awayCode);
+        const { winProb, drawProb } = matchOutcomeProbabilities(m.homeCode, m.awayCode);
+        const rand = Math.random();
+
+        if (rand < winProb) {
+          if (homeOwner != null) simPts[homeOwner] = (simPts[homeOwner] || 0) + 3;
+        } else if (rand < winProb + drawProb) {
+          if (homeOwner != null) simPts[homeOwner] = (simPts[homeOwner] || 0) + 1;
+          if (awayOwner != null) simPts[awayOwner] = (simPts[awayOwner] || 0) + 1;
+        } else {
+          if (awayOwner != null) simPts[awayOwner] = (simPts[awayOwner] || 0) + 3;
         }
-        if (state.ownership[m.awayCode] === p.id) {
-          return sum + expectedPointsFromRanks(m.awayCode, m.homeCode);
-        }
-        return sum;
-      }, 0);
+      }
 
-      const raw = Math.max(
-        0,
-        // Real tournament performance still matters.
-        p.pts * 5 +
-          p.gd * 1.75 +
-          p.gf * 0.7 +
-          // Remaining teams matter, but their quality matters more.
-          p.alive * 7 +
-          rankingStrength * 1.35 +
-          // Remaining fixtures are projected from FIFA ranking matchups.
-          projectedFixturePoints * 4.5 +
-          1,
-      );
+      // Award win fractionally in case of tie
+      const maxPts = Math.max(...Object.values(simPts));
+      const tied = Object.keys(simPts).filter((id) => simPts[id] === maxPts);
+      const share = 1 / tied.length;
+      tied.forEach((id) => { winCounts[id] += share; });
+    }
 
-      return {
-        ...p,
-        raw,
-        rankingStrength,
-        projectedFixturePoints,
-        avgRank,
-        bestRank,
-      };
-    });
-
-    const total = scores.reduce((sum, p) => sum + p.raw, 0) || 1;
-    return scores
-      .map((p) => ({ ...p, chance: Math.round((p.raw / total) * 100) }))
+    return board
+      .map((p) => {
+        const ownedTeams = Object.keys(p.teams || {});
+        const aliveTeams = ownedTeams.filter((tid) => tournamentData.alive.has(tid));
+        const aliveRanks = aliveTeams
+          .map((tid) => FIFA_RANKINGS[tid] || 211)
+          .sort((a, b) => a - b);
+        const avgRank = aliveRanks.length
+          ? Math.round(aliveRanks.reduce((sum, r) => sum + r, 0) / aliveRanks.length)
+          : null;
+        const projectedFixturePoints = remainingMatches.reduce((sum, m) => {
+          if (state.ownership[m.homeCode] === p.id) return sum + expectedPointsFromRanks(m.homeCode, m.awayCode);
+          if (state.ownership[m.awayCode] === p.id) return sum + expectedPointsFromRanks(m.awayCode, m.homeCode);
+          return sum;
+        }, 0);
+        return {
+          ...p,
+          chance: Math.round((winCounts[p.id] / N) * 100),
+          avgRank,
+          projectedFixturePoints,
+        };
+      })
       .sort(
         (a, b) =>
           b.chance - a.chance ||
