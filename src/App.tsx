@@ -578,6 +578,25 @@ export default function App() {
     return { teamStats, groupTables, alive, knockedOutByKo };
   }, [state.apiMatches, state.ownership, state.players]);
 
+
+  const countryOddsByTeam = useMemo(() => {
+    const rawRows = TEAM_IDS.map((tid) => {
+      const stats = tournamentData.teamStats[tid] || { pts: 0, gd: 0, gf: 0, w: 0, l: 0 };
+      const alive = tournamentData.alive.has(tid);
+      return {
+        tid,
+        rawOdds: rawAdjustedCountryOdds(tid, stats, alive),
+      };
+    });
+    const totalRaw = rawRows.reduce((sum, row) => sum + row.rawOdds, 0) || 1;
+    return Object.fromEntries(
+      rawRows.map((row) => [
+        row.tid,
+        row.rawOdds > 0 ? (row.rawOdds / totalRaw) * 100 : 0,
+      ]),
+    );
+  }, [tournamentData]);
+
   const board = useMemo(() => {
     const rows = state.players.map((p) => ({
       ...p,
@@ -1481,7 +1500,7 @@ export default function App() {
 
 
   const CountryPerformanceTable = () => {
-    const rawRows = TEAM_IDS.map((tid) => {
+    const rows = TEAM_IDS.map((tid) => {
       const stats = tournamentData.teamStats[tid] || { pts: 0, gd: 0, gf: 0 };
       const alive = tournamentData.alive.has(tid);
       return {
@@ -1489,36 +1508,28 @@ export default function App() {
         stats,
         alive,
         owner: ownerOf(tid),
-        rawOdds: rawAdjustedCountryOdds(tid, stats, alive),
+        odds: countryOddsByTeam[tid] || 0,
       };
-    });
-
-    const totalRaw = rawRows.reduce((sum, row) => sum + row.rawOdds, 0) || 1;
-    const rows = rawRows
-      .map((row) => ({
-        ...row,
-        odds: row.rawOdds > 0 ? (row.rawOdds / totalRaw) * 100 : 0,
-      }))
-      .sort(
-        (a, b) =>
-          b.stats.pts - a.stats.pts ||
-          b.stats.gd - a.stats.gd ||
-          b.odds - a.odds ||
-          TEAMS[a.tid][0].localeCompare(TEAMS[b.tid][0]),
-      );
+    }).sort(
+      (a, b) =>
+        b.stats.pts - a.stats.pts ||
+        b.stats.gd - a.stats.gd ||
+        b.odds - a.odds ||
+        TEAMS[a.tid][0].localeCompare(TEAMS[b.tid][0]),
+    );
 
     return (
       <div className="chartbox countryperformancebox">
         <div className="charthead">
           <div>
             <div className="glabel">COUNTRY PERFORMANCE</div>
-            <div className="subtle">Ordered by points won · coloured by manager</div>
+            <div className="subtle">Ordered by points won · row coloured by manager</div>
           </div>
         </div>
         <div className="rankinglist compact countryperf">
           <div className="rankingrow rankinghead countryperfrow">
             <span>Team</span>
-            <span>Owner</span>
+            <span>Manager</span>
             <span>Pts</span>
             <span>GD</span>
             <span>Odds</span>
@@ -1530,7 +1541,7 @@ export default function App() {
               style={owner ? { borderLeftColor: owner.color, background: `${owner.color}18` } : undefined}
             >
               <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
-              <span className="rankowner">{owner ? <ManagerPill player={owner} small /> : "—"}</span>
+              <span className="plainowner">{owner ? owner.name : "—"}</span>
               <b>{stats.pts}</b>
               <span>{gdText(stats.gd)}</span>
               <b>{odds.toFixed(2)}%</b>
@@ -1591,23 +1602,33 @@ export default function App() {
         </div>
 
         <div className="chartbox">
-          <div className="charthead"><div><div className="glabel">{selected.name}'S TEAMS</div><div className="subtle">Points, goal difference, FIFA ranking and survival status</div></div></div>
-          <div className="teamstatgrid">
+          <div className="charthead"><div><div className="glabel">{selected.name}'S TEAMS</div><div className="subtle">World Cup odds, FIFA ranking, points and goal difference</div></div></div>
+          <div className="rankinglist compact mysteamtable">
+            <div className="rankingrow rankinghead mysteamrow">
+              <span>Team</span>
+              <span>FIFA</span>
+              <span>Pts</span>
+              <span>GD</span>
+              <span>Odds</span>
+            </div>
             {teams
               .slice()
-              .sort((a, b) => (FIFA_RANKINGS[a] || 999) - (FIFA_RANKINGS[b] || 999))
+              .sort((a, b) => (countryOddsByTeam[b] || 0) - (countryOddsByTeam[a] || 0) || (FIFA_RANKINGS[a] || 999) - (FIFA_RANKINGS[b] || 999))
               .map((tid) => {
                 const t = tournamentData.teamStats[tid];
+                const alive = tournamentData.alive.has(tid);
+                const odds = countryOddsByTeam[tid] || 0;
                 return (
                   <div
                     key={tid}
-                    className={`teamstatcard compact mystatsrow ${tournamentData.alive.has(tid) ? "rag-green" : "rag-red"}`}
-                    style={{ background: `${playerColor}22`, borderLeftColor: playerColor }}
+                    className={`rankingrow mysteamrow ${alive ? "" : "out"}`}
+                    style={{ background: `${playerColor}18`, borderLeftColor: playerColor }}
                   >
-                    <b>{TEAMS[tid][1]} {TEAMS[tid][0]}</b>
-                    <span>{t.pts} pts</span>
-                    <span>GD {gdText(t.gd)}</span>
-                    <span>FIFA #{FIFA_RANKINGS[tid] || "—"}</span>
+                    <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
+                    <span>#{FIFA_RANKINGS[tid] || "—"}</span>
+                    <b>{t.pts}</b>
+                    <span>{gdText(t.gd)}</span>
+                    <b>{odds.toFixed(2)}%</b>
                   </div>
                 );
               })}
@@ -1935,6 +1956,7 @@ export default function App() {
               <span>L</span>
               <span>GD</span>
               <span>Alive</span>
+              <span>Exp</span>
               <span>Pts</span>
             </div>
             {board.map((p, i) => (
@@ -1952,6 +1974,7 @@ export default function App() {
                   <span>{p.l}</span>
                   <span>{gdText(p.gd)}</span>
                   <span>{p.alive}</span>
+                  <span className="exppts">{Math.round(p.pts + (trophyChances.find((x) => x.id === p.id)?.projectedFixturePoints || 0))}</span>
                   <b>{p.pts}</b>
                 </button>
                 {expanded === p.id && (
@@ -2072,5 +2095,9 @@ const CSS = `
 .managerpill{border:0!important;box-shadow:none!important}
 .leaguebox{padding:10px;background:#10271A;border:1px solid #ffffff12;border-radius:10px;margin-bottom:14px}.leaguegrow{display:grid;grid-template-columns:24px minmax(92px,1.25fr) 30px 26px 26px 26px 36px 42px 42px;gap:7px;align-items:center;border-left:4px solid transparent;border-bottom:1px solid #ffffff0c;padding:8px 8px;font-size:12px;color:#F0EDE2;width:100%;text-align:left}.leaguegrow.leaguehead{background:transparent!important;color:#9FBFA8;text-transform:uppercase;font-size:9px;letter-spacing:.08em;border-left-color:transparent!important}.leaguerow{border-top:0;border-right:0;border-bottom:1px solid #ffffff0c;cursor:pointer;border-radius:0}.leaguerow.lead{box-shadow:inset 0 0 0 1px #E8B33B33}.leaguename{font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.leaguesquad{border-left:4px solid #ffffff10}.playerrow{border-left:4px solid transparent;border-radius:8px;color:#F0EDE2}.playerrowname{font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.trophyrow.compact.playerrow{grid-template-columns:minmax(76px,1fr) minmax(54px,.85fr) 42px 50px;border:1px solid #ffffff12;border-left:4px solid transparent}.trophyrow.compact.playerrow .trophybar{height:8px;min-width:48px}.mystatsrow{border-left-width:4px!important}.rivalstable .rivalryrow.playerrow{border-left-width:4px!important}.teamstatcard.mystatsrow.rag-green,.teamstatcard.mystatsrow.rag-red{background-blend-mode:normal}.teamstatcard.mystatsrow.rag-green{box-shadow:inset 0 0 0 1px rgba(49,196,107,.18)}.teamstatcard.mystatsrow.rag-red{box-shadow:inset 0 0 0 1px rgba(223,85,72,.18)}
 @media(max-width:560px){.leaguebox{padding:7px}.leaguegrow{grid-template-columns:20px minmax(78px,1.1fr) 24px 21px 21px 21px 28px 32px 34px;gap:4px;padding:7px 5px;font-size:10.5px}.leaguegrow.leaguehead{font-size:8px}.trophyrow.compact.playerrow{grid-template-columns:minmax(70px,1fr) minmax(42px,.75fr) 36px 42px;gap:5px;padding:6px 5px;font-size:10.5px}.trophyrow.compact.playerrow b{font-size:14px}.playerrowname{font-size:10.5px}.leaguebox .managerpill{display:none}}
+
+
+/* compact country/team tables + expected points column */
+.leaguegrow{grid-template-columns:24px minmax(86px,1.2fr) 30px 26px 26px 26px 36px 42px 38px 42px!important}.leaguegrow .exppts{color:#C8D8CC;font-weight:700;opacity:.78}.countryperfrow{grid-template-columns:minmax(118px,1.35fr) minmax(62px,.75fr) 34px 38px 54px!important;gap:6px!important;padding:6px 7px!important;font-size:11.5px!important}.countryperfrow .plainowner{font-weight:800;color:#F0EDE2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.countryperfrow b:last-child{font-family:'Saira Condensed';font-size:16px;color:#E8B33B}.mysteamrow{grid-template-columns:minmax(116px,1.35fr) 44px 34px 38px 58px!important;gap:6px!important;padding:7px 8px!important;font-size:11.5px!important;border-left:4px solid transparent}.mysteamrow b:last-child{font-family:'Saira Condensed';font-size:16px;color:#E8B33B}.mysteamtable .rankinghead,.countryperf .rankinghead{background:transparent!important;color:#9FBFA8!important;text-transform:uppercase;font-size:9px!important;letter-spacing:.08em!important;border-left-color:transparent!important}@media(max-width:560px){.leaguegrow{grid-template-columns:20px minmax(70px,1.05fr) 23px 20px 20px 20px 28px 31px 30px 32px!important;gap:3px!important;padding:7px 4px!important;font-size:9.8px!important}.leaguegrow.leaguehead{font-size:7.5px!important}.countryperfrow{grid-template-columns:minmax(98px,1.3fr) minmax(52px,.65fr) 28px 31px 46px!important;gap:4px!important;padding:5px 5px!important;font-size:10px!important}.countryperfrow b:last-child{font-size:13px!important}.mysteamrow{grid-template-columns:minmax(94px,1.3fr) 36px 26px 31px 46px!important;gap:4px!important;padding:6px 5px!important;font-size:10px!important}.mysteamrow b:last-child{font-size:13px!important}}
 
 `;
