@@ -963,38 +963,14 @@ export default function App() {
     const gap = leader && second ? leader.pts - second.pts : 0;
     let leaderLine = "";
     if (leader) {
-      if (gap === 0) leaderLine = `${leader.name} and ${second?.name} are level — going to goal difference. `;
-      else if (gap <= 3) leaderLine = `${leader.name} clings on by ${gap}pt${gap === 1 ? "" : "s"} — tighter than a VAR angle. `;
-      else if (gap <= 9) leaderLine = `${leader.name} sitting on a ${gap}-point cushion. Comfortable, not safe. `;
-      else leaderLine = `${leader.name} is ${gap} points clear. Someone call the engravers. `;
-    }
-
-    const recentFinished = state.apiMatches.filter(
-      (m) => isFinished(m) && m.homeCode && m.awayCode && typeof m.homeGoals === "number" && typeof m.awayGoals === "number",
-    ).slice(-30);
-    let notableMatch = null;
-    let bestDiff = 2;
-    for (const m of recentFinished) {
-      const diff = Math.abs(m.homeGoals - m.awayGoals);
-      if (diff > bestDiff) { bestDiff = diff; notableMatch = m; }
-    }
-    let resultLine = "";
-    if (notableMatch) {
-      const hName = TEAMS[notableMatch.homeCode]?.[0] || notableMatch.homeCode;
-      const aName = TEAMS[notableMatch.awayCode]?.[0] || notableMatch.awayCode;
-      const hFlag = TEAMS[notableMatch.homeCode]?.[1] || "";
-      const aFlag = TEAMS[notableMatch.awayCode]?.[1] || "";
-      if (notableMatch.homeGoals > notableMatch.awayGoals) {
-        resultLine = `${hFlag} ${hName} ${notableMatch.homeGoals}-${notableMatch.awayGoals} ${aName} ${aFlag} the scoreline of the day.`;
-      } else {
-        resultLine = `${aFlag} ${aName} ${notableMatch.awayGoals}-${notableMatch.homeGoals} ${hName} ${hFlag} turning heads.`;
-      }
+      if (gap === 0) leaderLine = `${leader.name} and ${second?.name} are level on points.`;
+      else leaderLine = `${leader.name} is winning by ${gap} point${gap === 1 ? "" : "s"}.`;
     }
 
     canvas.toBlob(async (blob) => {
       if (!blob) return;
       const file = new File([blob], "dingae-sweepstake-table.png", { type: "image/png" });
-      const shareText = `${leaderLine}${resultLine}\n\nFollow the live table: https://dingaesweepstakewc26.vercel.app`;
+      const shareText = `${leaderLine}\n\nFollow the live table: https://dingaesweepstakewc26.vercel.app`;
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: "Dingae Sweepstake table", text: shareText });
         return;
