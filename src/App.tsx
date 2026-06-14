@@ -467,8 +467,6 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [statsPlayer, setStatsPlayer] = useState("0");
-  const [simMode, setSimMode] = useState(false);
-  const [simOverrides, setSimOverrides] = useState({});
 
   useEffect(() => {
     try {
@@ -690,26 +688,11 @@ export default function App() {
 
     state.apiMatches.forEach((m) => {
       if (!m.homeCode || !m.awayCode) return;
-      if (isFinished(m)) {
-        if (typeof m.homeGoals !== "number" || typeof m.awayGoals !== "number") return;
-        credit(m.homeCode, resultFor(m, "home"), m.homeGoals, m.awayGoals);
-        credit(m.awayCode, resultFor(m, "away"), m.awayGoals, m.homeGoals);
-      } else {
-        const simKey = `${m.homeCode}-${m.awayCode}`;
-        const override = simOverrides[simKey];
-        if (override) {
-          if (override === "home") {
-            credit(m.homeCode, "w", 1, 0);
-            credit(m.awayCode, "l", 0, 1);
-          } else if (override === "draw") {
-            credit(m.homeCode, "d", 0, 0);
-            credit(m.awayCode, "d", 0, 0);
-          } else if (override === "away") {
-            credit(m.homeCode, "l", 0, 1);
-            credit(m.awayCode, "w", 1, 0);
-          }
-        }
-      }
+      if (!isFinished(m)) return;
+      if (typeof m.homeGoals !== "number" || typeof m.awayGoals !== "number")
+        return;
+      credit(m.homeCode, resultFor(m, "home"), m.homeGoals, m.awayGoals);
+      credit(m.awayCode, resultFor(m, "away"), m.awayGoals, m.homeGoals);
     });
 
     return rows.sort(
@@ -720,74 +703,7 @@ export default function App() {
         a.name.localeCompare(b.name),
     );
 
-  }, [state.players, state.ownership, state.apiMatches, tournamentData.alive, simOverrides]);
-
-  const keyMatchup = useMemo(() => {
-    const upcoming = state.apiMatches.filter(
-      (m) => m.homeCode && m.awayCode && !isFinished(m) && !isLive(m),
-    );
-
-    let best = null;
-    let bestScore = -Infinity;
-
-    upcoming.forEach((m) => {
-      const homeOwner = ownerOf(m.homeCode);
-      const awayOwner = ownerOf(m.awayCode);
-      if (!homeOwner || !awayOwner) return;
-      if (homeOwner.id === awayOwner.id) return;
-
-      const homeRow = board.find((r) => r.id === homeOwner.id);
-      const awayRow = board.find((r) => r.id === awayOwner.id);
-      if (!homeRow || !awayRow) return;
-
-      const pointsGap = Math.abs(homeRow.pts - awayRow.pts);
-      const homeAlive = tournamentData.alive.has(m.homeCode) ? 1 : 0;
-      const awayAlive = tournamentData.alive.has(m.awayCode) ? 1 : 0;
-      const aliveBonus = homeAlive + awayAlive === 2 ? 2 : homeAlive + awayAlive === 1 ? 1 : 0;
-
-      const score = (100 - pointsGap) * aliveBonus;
-      if (score > bestScore) {
-        bestScore = score;
-        best = { match: m, homeOwner, awayOwner, score };
-      }
-    });
-
-    return best;
-  }, [state.apiMatches, board, tournamentData.alive, state.ownership, state.players]);
-
-  const eliminationRisk = useMemo(() => {
-    // For each manager, check if any alive team has exactly 1 remaining group match
-    // and is currently in 3rd or 4th place in their group
-    const riskMap = {}; // pid -> [{tid, teamName, teamFlag}]
-    state.players.forEach((p) => {
-      riskMap[p.id] = [];
-    });
-
-    TEAM_IDS.forEach((tid) => {
-      if (!tournamentData.alive.has(tid)) return;
-      const pid = state.ownership[tid];
-      if (pid == null) return;
-
-      // Count remaining group stage matches
-      const remainingGroupMatches = state.apiMatches.filter(
-        (m) =>
-          !isFinished(m) &&
-          isGroupMatch(m) &&
-          (m.homeCode === tid || m.awayCode === tid),
-      );
-      if (remainingGroupMatches.length !== 1) return;
-
-      // Check group position (3rd or 4th = index 2 or 3)
-      const group = TEAMS[tid][2];
-      const groupTable = tournamentData.groupTables[group] || [];
-      const posIdx = groupTable.findIndex((r) => r.tid === tid);
-      if (posIdx >= 2) {
-        riskMap[pid].push({ tid, teamName: TEAMS[tid][0], teamFlag: TEAMS[tid][1] });
-      }
-    });
-
-    return riskMap;
-  }, [state.players, state.ownership, state.apiMatches, tournamentData]);
+  }, [state.players, state.ownership, state.apiMatches, tournamentData.alive]);
 
   const trophyChances = useMemo(() => {
     const N = 2000;
@@ -1197,8 +1113,6 @@ export default function App() {
     const awayOwner = ownerOf(m.awayCode);
     const homeExp = m.homeCode && m.awayCode ? expectedPointsFromRanks(m.homeCode, m.awayCode).toFixed(1) : "—";
     const awayExp = m.homeCode && m.awayCode ? expectedPointsFromRanks(m.awayCode, m.homeCode).toFixed(1) : "—";
-    const simKey = `${m.homeCode}-${m.awayCode}`;
-    const simOverride = simOverrides[simKey];
     return (
       <div
         className={`match ${winnerOwner ? "managerwin" : ""}`}
@@ -1238,25 +1152,6 @@ export default function App() {
             )}
           </div>
         </div>
-        {simMode && !isFinished(m) && m.homeCode && m.awayCode && (() => {
-          const simKey2 = `${m.homeCode}-${m.awayCode}`;
-          const activeOverride = simOverrides[simKey2];
-          const setOverride = (val) => setSimOverrides((prev) => {
-            if (prev[simKey2] === val) {
-              const next = { ...prev };
-              delete next[simKey2];
-              return next;
-            }
-            return { ...prev, [simKey2]: val };
-          });
-          return (
-            <div className="simbtnrow">
-              <button className={`simbtn ${activeOverride === "home" ? "active" : ""}`} onClick={() => setOverride("home")}>H</button>
-              <button className={`simbtn ${activeOverride === "draw" ? "active" : ""}`} onClick={() => setOverride("draw")}>D</button>
-              <button className={`simbtn ${activeOverride === "away" ? "active" : ""}`} onClick={() => setOverride("away")}>A</button>
-            </div>
-          );
-        })()}
       </div>
     );
   };
@@ -1776,7 +1671,7 @@ export default function App() {
                     className={`rankingrow mysteamrow ${alive ? "" : "out"}`}
                     style={{ background: `${playerColor}18`, borderLeftColor: playerColor }}
                   >
-                    <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}{eliminationRisk[selected.id]?.some((r) => r.tid === tid) ? <span className="atriskpill">AT RISK</span> : null}</span>
+                    <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
                     <span>#{FIFA_RANKINGS[tid] || "—"}</span>
                     <b>{t.pts}</b>
                     <span>{gdText(t.gd)}</span>
@@ -2000,30 +1895,6 @@ export default function App() {
                   : "Tap update to fetch scores")}
             </span>
           </div>
-          {keyMatchup && (() => {
-            const { match: km, homeOwner: kHome, awayOwner: kAway } = keyMatchup;
-            const kHomeFlag = flagForTeam(km.homeCode, km.homeName);
-            const kAwayFlag = flagForTeam(km.awayCode, km.awayName);
-            return (
-              <div className="keymatchupcard">
-                <div className="keymatchuplabel">CRUCIAL FIXTURE · KEY MATCHUP</div>
-                <div className="keymatchupdate">{km.date ? new Date(km.date).toLocaleString() : "Date TBC"} · {matchDisplayRound(km)}</div>
-                <div className="keymatchupteams">
-                  <div className="keymatchupteam">
-                    <span className="keymatchupflag">{kHomeFlag}</span>
-                    <span className="keymatchupname">{nameFor(km.homeCode, km.homeName)}</span>
-                    <span className="managerpill" style={{ background: `${kHome.color}33`, border: `1px solid ${kHome.color}`, color: kHome.color }}>{kHome.name}</span>
-                  </div>
-                  <div className="keymatchupvs">VS</div>
-                  <div className="keymatchupteam r">
-                    <span className="keymatchupflag">{kAwayFlag}</span>
-                    <span className="keymatchupname">{nameFor(km.awayCode, km.awayName)}</span>
-                    <span className="managerpill" style={{ background: `${kAway.color}33`, border: `1px solid ${kAway.color}`, color: kAway.color }}>{kAway.name}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
           <div className="filtercollapse">
             <button className="clearfilterbtn filtertoggle" onClick={() => setFiltersOpen(!filtersOpen)}>
               {filtersOpen ? "Hide filters" : "Show filters"}
@@ -2122,29 +1993,9 @@ export default function App() {
         <section className="pane">
           <div className="panehead">
             <h2>League Table</h2>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                className="editdraftbtn"
-                style={{ background: simMode ? "#6FB8E8" : "#6FB8E8", color: "#0C1F15", opacity: simMode ? 1 : 0.7 }}
-                onClick={() => { setSimMode(!simMode); if (simMode) setSimOverrides({}); }}
-              >
-                {simMode ? "Exit Sim" : "Simulate"}
-              </button>
-              <button className="editdraftbtn" onClick={shareTableImageToWhatsApp}>Share table image</button>
-            </div>
+            <button className="editdraftbtn" onClick={shareTableImageToWhatsApp}>Share table image</button>
           </div>
           <div className="subtle tableintro">Points · GD · alive teams</div>
-          {simMode && (
-            <div className="simmodebanner">
-              <span>SIM MODE — hypothetical results active</span>
-              {Object.keys(simOverrides).length > 0 && (
-                <button className="clearfilterbtn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setSimOverrides({})}>Clear</button>
-              )}
-            </div>
-          )}
-          {simMode && Object.keys(simOverrides).length > 0 && (
-            <div className="simbadge">SIMULATED</div>
-          )}
           <div className="leaguebox groupbox">
             <div className="leaguegrow leaguehead">
               <span>#</span>
@@ -2158,10 +2009,7 @@ export default function App() {
               <span>Exp</span>
               <span>Pts</span>
             </div>
-            {board.map((p, i) => {
-              const atRiskTeams = eliminationRisk[p.id] || [];
-              const riskTitle = atRiskTeams.length > 0 ? `At risk: ${atRiskTeams.map((t) => t.teamName).join(", ")}` : "";
-              return (
+            {board.map((p, i) => (
               <div key={p.id}>
                 <button
                   className={`leaguegrow leaguerow ${i === 0 && p.pts > 0 ? "lead" : ""}`}
@@ -2169,7 +2017,7 @@ export default function App() {
                   onClick={() => setExpanded(expanded === p.id ? null : p.id)}
                 >
                   <span>{i + 1}</span>
-                  <span className="leaguename" title={riskTitle}>{p.name}{i === 0 && leaderPts > 0 ? " 🏆" : ""}{atRiskTeams.length > 0 ? <span className="riskalert" title={riskTitle}> ⚠</span> : null}</span>
+                  <span className="leaguename">{p.name}{i === 0 && leaderPts > 0 ? " 🏆" : ""}</span>
                   <span>{p.gp}</span>
                   <span>{p.w}</span>
                   <span>{p.d}</span>
@@ -2200,8 +2048,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              );
-            })}
+            ))}
           </div>
           <PointsRaceChart />
           <PositionRaceChart />
@@ -2311,13 +2158,4 @@ const CSS = `
 @media(max-width:560px){.countryperfrow{grid-template-columns:minmax(80px,1.1fr) 42px 26px 30px 34px 40px 42px 36px!important;font-size:9.5px!important}.mysteamrow{grid-template-columns:minmax(76px,1.1fr) 32px 26px 28px 32px 38px 40px 36px!important;font-size:9.5px!important}.rankinglist.compact>.rankingrow:not(.countryperfrow):not(.mysteamrow):not(.opponentrow){grid-template-columns:28px minmax(88px,1.1fr) 36px 42px minmax(54px,.7fr);font-size:9.5px!important}.rankowner .managerpill{font-size:8.5px!important;padding:2px 4px!important}.oppchip{font-size:9.5px!important;padding:4px 6px!important}}
 
 .charthead{margin-left:0!important;padding-left:0!important}.glabel{margin-left:0!important;padding-left:0!important}
-
-/* Feature 1: Key Matchup card */
-.keymatchupcard{background:linear-gradient(135deg,#10271A,#0e2018);border:2px solid #E8B33B88;border-radius:12px;padding:12px 14px;margin-bottom:12px;box-shadow:0 0 18px #E8B33B18}.keymatchuplabel{font-family:'Saira Condensed';font-weight:800;letter-spacing:.18em;font-size:11px;color:#E8B33B;text-transform:uppercase;margin-bottom:4px}.keymatchupdate{font-size:11px;color:#9FBFA8;margin-bottom:10px}.keymatchupteams{display:flex;align-items:center;gap:8px}.keymatchupteam{flex:1;display:flex;flex-direction:column;gap:5px;align-items:flex-start}.keymatchupteam.r{align-items:flex-end;text-align:right}.keymatchupflag{font-size:24px;line-height:1}.keymatchupname{font-weight:900;font-size:13.5px;color:#F0EDE2}.keymatchupvs{font-family:'Saira Condensed';font-weight:800;font-size:20px;color:#E8B33B;padding:0 4px;flex:0 0 auto}
-
-/* Feature 2: Sim mode */
-.simmodebanner{background:#6FB8E822;border:1px solid #6FB8E888;border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#6FB8E8;font-weight:700}.simbadge{font-family:'Saira Condensed';font-weight:800;letter-spacing:.18em;font-size:11px;color:#6FB8E8;background:#6FB8E822;border:1px solid #6FB8E866;border-radius:999px;padding:4px 12px;margin-bottom:10px;text-align:center;text-transform:uppercase}.simbtnrow{display:flex;gap:6px;margin-top:8px;justify-content:center}.simbtn{background:#0C1F15;border:1px solid #ffffff22;color:#9FBFA8;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:background .15s}.simbtn.active{background:#6FB8E8;color:#0C1F15;border-color:#6FB8E8;font-weight:900}
-
-/* Feature 3: Elimination risk */
-.riskalert{color:#E8A23B;font-size:12px;cursor:help}.atriskpill{font-size:9px;background:#E8A23B22;border:1px solid #E8A23B66;color:#E8A23B;border-radius:999px;padding:2px 6px;margin-left:5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle}
 `;
