@@ -10,7 +10,7 @@ const TEAMS = {
   CAN: ["Canada", "🇨🇦", "B"],
   SUI: ["Switzerland", "🇨🇭", "B"],
   QAT: ["Qatar", "🇶🇦", "B"],
-  BIH: ["Bosnia", "🇧🇦", "B"],
+  BIH: ["Bosnia-Herzegovina", "🇧🇦", "B"],
   BRA: ["Brazil", "🇧🇷", "C"],
   MAR: ["Morocco", "🇲🇦", "C"],
   SCO: ["Scotland", "🏴", "C"],
