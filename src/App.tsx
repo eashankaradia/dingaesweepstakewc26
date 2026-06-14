@@ -386,6 +386,14 @@ function groupForMatch(match) {
   return "KO";
 }
 
+function fmtDateTime(value) {
+  if (!value) return "";
+  return new Date(value).toLocaleString("en-GB", {
+    day: "2-digit", month: "2-digit", year: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
 function localDateKey(value) {
   if (!value) return "";
   const d = new Date(value);
@@ -925,7 +933,7 @@ export default function App() {
     ctx.fillText("DINGAE SWEEPSTAKE", 34, 58);
     ctx.fillStyle = "#9FBFA8";
     ctx.font = "20px Arial";
-    ctx.fillText(`Updated ${new Date().toLocaleString()}`, 34, 90);
+    ctx.fillText(`Updated ${fmtDateTime(new Date())}`, 34, 90);
 
     ctx.fillStyle = "#10271A";
     ctx.fillRect(24, 108, width - 48, rows.length * rowH + 12);
@@ -1128,7 +1136,7 @@ export default function App() {
           <span className={`grpbadge ${statusClass}`}>{m.status || "NS"}</span>
           <span className="city">{matchDisplayRound(m)}</span>
           {m.date && (
-            <span className="city">{new Date(m.date).toLocaleString()}</span>
+            <span className="city">{fmtDateTime(m.date)}</span>
           )}
         </div>
         <div className="scoreline">
@@ -1921,12 +1929,18 @@ export default function App() {
             <button className="syncbtn" onClick={runSync} disabled={!canRefresh}>
               {refreshButtonText}
             </button>
+            <label className="togglelabel">
+              <span>Compact</span>
+              <span className={`toggleswitch ${compactResults ? "on" : ""}`} onClick={() => setCompactResults((v) => !v)} role="switch" aria-checked={compactResults}>
+                <span className="toggleknob" />
+              </span>
+            </label>
             <span className="syncmsg">
               {syncMsg ||
                 (!canRefresh
-                  ? `Next refresh available in ${refreshMinutesLeft} minute${refreshMinutesLeft === 1 ? "" : "s"}`
+                  ? `Next refresh in ${refreshMinutesLeft}m`
                   : state.lastSync
-                  ? "Last check " + new Date(state.lastSync).toLocaleString()
+                  ? "Last check " + fmtDateTime(state.lastSync)
                   : "Tap update to fetch scores")}
             </span>
           </div>
@@ -1943,30 +1957,20 @@ export default function App() {
             >
               Today
             </button>
-            <button
-              className={`clearfilterbtn todaybtn ${resultStatusFilter === "finished" ? "on" : ""}`}
-              onClick={() => setResultStatusFilter(resultStatusFilter === "finished" ? "all" : "finished")}
-            >
-              Done
-            </button>
-            <button
-              className={`clearfilterbtn todaybtn ${resultStatusFilter === "live" ? "on" : ""}`}
-              onClick={() => setResultStatusFilter(resultStatusFilter === "live" ? "all" : "live")}
-            >
-              Live
-            </button>
-            <button
-              className={`clearfilterbtn todaybtn ${resultStatusFilter === "future" ? "on" : ""}`}
-              onClick={() => setResultStatusFilter(resultStatusFilter === "future" ? "all" : "future")}
-            >
-              Upcoming
-            </button>
-            <label className="togglelabel">
-              <span>Compact</span>
-              <span className={`toggleswitch ${compactResults ? "on" : ""}`} onClick={() => setCompactResults((v) => !v)} role="switch" aria-checked={compactResults}>
-                <span className="toggleknob" />
-              </span>
-            </label>
+            <div className="statusfiltergroup">
+              <button
+                className={`statusbtn ${resultStatusFilter === "finished" ? "on" : ""}`}
+                onClick={() => setResultStatusFilter(resultStatusFilter === "finished" ? "all" : "finished")}
+              >Done</button>
+              <button
+                className={`statusbtn ${resultStatusFilter === "live" ? "on" : ""}`}
+                onClick={() => setResultStatusFilter(resultStatusFilter === "live" ? "all" : "live")}
+              >Live</button>
+              <button
+                className={`statusbtn ${resultStatusFilter === "future" ? "on" : ""}`}
+                onClick={() => setResultStatusFilter(resultStatusFilter === "future" ? "all" : "future")}
+              >Upcoming</button>
+            </div>
             {(resultFilter !== "all" || resultGroupFilter !== "all" || resultDateFilter || resultCountryFilter !== "all" || resultStatusFilter !== "all") && (
               <button
                 className="clearfilterbtn"
@@ -2218,6 +2222,11 @@ const CSS = `
 @media(max-width:560px){.countryperfrow{grid-template-columns:minmax(80px,1.1fr) 42px 26px 30px 34px 40px 42px 36px!important;font-size:9.5px!important}.mysteamrow{grid-template-columns:minmax(76px,1.1fr) 32px 26px 28px 32px 38px 40px 36px!important;font-size:9.5px!important}.rankinglist.compact>.rankingrow:not(.countryperfrow):not(.mysteamrow):not(.opponentrow){grid-template-columns:28px minmax(88px,1.1fr) 36px 42px minmax(54px,.7fr);font-size:9.5px!important}.rankowner .managerpill{font-size:8.5px!important;padding:2px 4px!important}.oppchip{font-size:9.5px!important;padding:4px 6px!important}}
 
 .charthead{margin-left:0!important;padding-left:0!important}.glabel{margin-left:0!important;padding-left:0!important}
+
+.statusfiltergroup{display:inline-flex;gap:0;border:1px solid #ffffff24;border-radius:8px;overflow:hidden;flex-shrink:0}
+.statusbtn{background:transparent;border:0;border-right:1px solid #ffffff18;color:#9FBFA8;font-size:11px;padding:6px 9px;cursor:pointer;white-space:nowrap}
+.statusbtn:last-child{border-right:0}
+.statusbtn.on{background:#E8B33B;color:#0C1F15;font-weight:800}
 
 .togglelabel{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#9FBFA8;cursor:pointer;user-select:none;padding:4px 0}
 .toggleswitch{display:inline-block;width:40px;height:22px;background:#2a3d32;border-radius:999px;position:relative;transition:background .2s;cursor:pointer;flex-shrink:0}
