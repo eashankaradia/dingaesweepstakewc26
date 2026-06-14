@@ -946,20 +946,21 @@ export default function App() {
 
     ctx.fillStyle = "#9FBFA8";
     ctx.font = "18px Arial";
-    ctx.fillText("Share image generated from the live table", 34, height - 22);
+    ctx.fillText("dingaesweepstakewc26.vercel.app", 34, height - 22);
 
     canvas.toBlob(async (blob) => {
       if (!blob) return;
       const file = new File([blob], "dingae-sweepstake-table.png", { type: "image/png" });
+      const shareText = "DINGAE SWEEPSTAKE — follow the live table at https://dingaesweepstakewc26.vercel.app";
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: "Dingae Sweepstake table" });
+        await navigator.share({ files: [file], title: "Dingae Sweepstake table", text: shareText });
         return;
       }
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = "dingae-sweepstake-table.png";
       link.click();
-      window.open("https://wa.me/?text=" + encodeURIComponent("DINGAE SWEEPSTAKE table image downloaded — attach it here."), "_blank", "noopener,noreferrer");
+      window.open("https://wa.me/?text=" + encodeURIComponent(shareText), "_blank", "noopener,noreferrer");
     }, "image/png");
   };
 
