@@ -420,6 +420,10 @@ function matchDisplayRound(match) {
   return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function matchChannel(match) {
+  return match?.channel || match?.tvChannel || "";
+}
+
 function winningTeamCode(match) {
   if (!isFinished(match)) return null;
   if (typeof match.homeGoals !== "number" || typeof match.awayGoals !== "number") return null;
@@ -1127,6 +1131,7 @@ export default function App() {
     const awayOwner = ownerOf(m.awayCode);
     const homeExp = m.homeCode && m.awayCode ? expectedPointsFromRanks(m.homeCode, m.awayCode).toFixed(1) : "—";
     const awayExp = m.homeCode && m.awayCode ? expectedPointsFromRanks(m.awayCode, m.homeCode).toFixed(1) : "—";
+    const channel = matchChannel(m);
     return (
       <div
         className={`match ${winnerOwner ? "managerwin" : ""}`}
@@ -1138,6 +1143,7 @@ export default function App() {
           {m.date && (
             <span className="city">{fmtDateTime(m.date)}</span>
           )}
+          {channel && <span className="channelpill">{channel}</span>}
         </div>
         <div className="scoreline">
           <div className="teamcell">
@@ -1180,6 +1186,7 @@ export default function App() {
     const statusClass = isFinished(m) ? "done" : isLive(m) ? "live" : "future";
     const winnerCode = winningTeamCode(m);
     const winnerOwner = winnerCode ? ownerOf(winnerCode) : null;
+    const channel = matchChannel(m);
     return (
       <div
         className="compactmatch"
@@ -1195,6 +1202,7 @@ export default function App() {
           <span className="compactteam">{nameFor(m.awayCode, m.awayName)} {awayFlag}</span>
           {awayOwner && <span className="compactowner" style={{ color: awayOwner.color }}>{awayOwner.name}</span>}
         </span>
+        {channel && <span className="compactchannel">{channel}</span>}
       </div>
     );
   };
@@ -1539,7 +1547,7 @@ export default function App() {
                   <span>{flagForTeam(m.homeCode, m.homeName)} {nameFor(m.homeCode, m.homeName)}</span>
                   <strong>{typeof m.homeGoals === "number" ? m.homeGoals : ""} : {typeof m.awayGoals === "number" ? m.awayGoals : ""}</strong>
                   <span>{nameFor(m.awayCode, m.awayName)} {flagForTeam(m.awayCode, m.awayName)}</span>
-                  <small>{m.status || "NS"}</small>
+                  <small>{m.status || "NS"}{matchChannel(m) ? ` · ${matchChannel(m)}` : ""}</small>
                 </div>
               ))}
             </div>
@@ -2215,12 +2223,14 @@ const CSS = `
 .toggleknob{position:absolute;top:3px;left:3px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px #0004}
 .toggleswitch.on .toggleknob{transform:translateX(18px)}
 
+.channelpill{border:1px solid #E8B33B55;background:#E8B33B14;color:#F0EDE2;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:800;white-space:nowrap}
 .compactmatch{display:grid;grid-template-columns:38px 1fr 48px 1fr;gap:4px 8px;align-items:center;padding:7px 10px;border:1px solid #ffffff12;border-radius:8px;margin-bottom:5px;background:#10271A}
 .compacthome{display:flex;flex-direction:column;gap:1px;align-items:flex-end;min-width:0;overflow:hidden}
 .compactaway{display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden}
 .compactteam{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .compactowner{font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;opacity:.9}
 .compactscore{font-family:'Saira Condensed';font-weight:800;font-size:20px;color:#E8B33B;text-align:center;white-space:nowrap}
+.compactchannel{grid-column:1/-1;color:#C8D8CC;font-size:10.5px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:560px){
   .compactmatch{padding:5px 8px;gap:2px 5px;grid-template-columns:32px 1fr 42px 1fr}
   .compacthome{flex-direction:row;align-items:center;justify-content:flex-end;gap:3px}
@@ -2228,6 +2238,7 @@ const CSS = `
   .compactteam{font-size:11px}
   .compactowner{font-size:9.5px}
   .compactscore{font-size:16px}
+  .channelpill{font-size:10px;padding:2px 6px}
 }
 
 @media(max-width:560px){
