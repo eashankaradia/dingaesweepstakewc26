@@ -467,6 +467,8 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [statsPlayer, setStatsPlayer] = useState("0");
+  const [simMode, setSimMode] = useState(false);
+  const [simOverrides, setSimOverrides] = useState({});
 
   useEffect(() => {
     try {
@@ -695,6 +697,27 @@ export default function App() {
       credit(m.awayCode, resultFor(m, "away"), m.awayGoals, m.homeGoals);
     });
 
+    // Apply sim overrides for unfinished matches
+    state.apiMatches.forEach((m) => {
+      if (!m.homeCode || !m.awayCode) return;
+      if (isFinished(m)) return; // only unfinished
+      const key = `${m.homeCode}-${m.awayCode}`;
+      const override = simOverrides[key];
+      if (!override) return;
+      const homeOwnerPid = state.ownership[m.homeCode];
+      const awayOwnerPid = state.ownership[m.awayCode];
+      if (override === 'home') {
+        if (homeOwnerPid != null) { const row = byId[homeOwnerPid]; if (row) { row.pts += 3; row.w++; row.gp++; if (!row.teams[m.homeCode]) row.teams[m.homeCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.homeCode].pts += 3; row.teams[m.homeCode].w++; } }
+        if (awayOwnerPid != null) { const row = byId[awayOwnerPid]; if (row) { row.l++; row.gp++; if (!row.teams[m.awayCode]) row.teams[m.awayCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.awayCode].l++; } }
+      } else if (override === 'away') {
+        if (awayOwnerPid != null) { const row = byId[awayOwnerPid]; if (row) { row.pts += 3; row.w++; row.gp++; if (!row.teams[m.awayCode]) row.teams[m.awayCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.awayCode].pts += 3; row.teams[m.awayCode].w++; } }
+        if (homeOwnerPid != null) { const row = byId[homeOwnerPid]; if (row) { row.l++; row.gp++; if (!row.teams[m.homeCode]) row.teams[m.homeCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.homeCode].l++; } }
+      } else if (override === 'draw') {
+        if (homeOwnerPid != null) { const row = byId[homeOwnerPid]; if (row) { row.pts += 1; row.d++; row.gp++; if (!row.teams[m.homeCode]) row.teams[m.homeCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.homeCode].pts += 1; row.teams[m.homeCode].d++; } }
+        if (awayOwnerPid != null) { const row = byId[awayOwnerPid]; if (row) { row.pts += 1; row.d++; row.gp++; if (!row.teams[m.awayCode]) row.teams[m.awayCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.awayCode].pts += 1; row.teams[m.awayCode].d++; } }
+      }
+    });
+
     return rows.sort(
       (a, b) =>
         b.pts - a.pts ||
@@ -703,7 +726,70 @@ export default function App() {
         a.name.localeCompare(b.name),
     );
 
-  }, [state.players, state.ownership, state.apiMatches, tournamentData.alive]);
+  }, [state.players, state.ownership, state.apiMatches, tournamentData.alive, simOverrides]);
+
+  const keyMatchup = useMemo(() => {
+    let best = null;
+    let bestScore = -Infinity;
+    state.apiMatches.forEach((m) => {
+      if (isFinished(m)) return;
+      const homeOwner = ownerOf(m.homeCode);
+      const awayOwner = ownerOf(m.awayCode);
+      if (!homeOwner || !awayOwner) return;
+      if (homeOwner.id === awayOwner.id) return;
+      const homePts = board.find((p) => p.id === homeOwner.id)?.pts ?? 0;
+      const awayPts = board.find((p) => p.id === awayOwner.id)?.pts ?? 0;
+      const pointsGap = Math.abs(homePts - awayPts);
+      const homeAlive = tournamentData.alive.has(m.homeCode);
+      const awayAlive = tournamentData.alive.has(m.awayCode);
+      const aliveBonus = (homeAlive && awayAlive) ? 2 : (homeAlive || awayAlive) ? 1 : 0;
+      if (aliveBonus === 0) return;
+      const score = (100 - pointsGap) * aliveBonus;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { m, homeOwner, awayOwner };
+      }
+    });
+    return best;
+  }, [state.apiMatches, board, tournamentData.alive]);
+
+  const eliminationRisks = useMemo(() => {
+    // For each player, check if any alive team has exactly 1 remaining group match AND is in 3rd or 4th in their group
+    const risks = {}; // playerId -> [{tid, teamName, flag, groupPos}]
+
+    state.players.forEach((p) => {
+      const ownedTeams = Object.keys(state.ownership).filter(tid => state.ownership[tid] === p.id);
+      const riskyTeams = [];
+
+      ownedTeams.forEach((tid) => {
+        if (!tournamentData.alive.has(tid)) return;
+        const group = TEAMS[tid]?.[2];
+        if (!group) return;
+
+        // Count remaining group matches for this team
+        const remainingGroupMatches = state.apiMatches.filter(m =>
+          !isFinished(m) &&
+          isGroupMatch(m) &&
+          (m.homeCode === tid || m.awayCode === tid)
+        );
+        if (remainingGroupMatches.length !== 1) return;
+
+        // Check group position (0-indexed from groupTables)
+        const groupTable = tournamentData.groupTables[group];
+        if (!groupTable) return;
+        const pos = groupTable.findIndex(r => r.tid === tid);
+        if (pos < 2) return; // top 2 are safe, only flag 3rd (pos=2) and 4th (pos=3)
+
+        riskyTeams.push({ tid, teamName: TEAMS[tid][0], flag: TEAMS[tid][1], groupPos: pos + 1 });
+      });
+
+      if (riskyTeams.length > 0) {
+        risks[p.id] = riskyTeams;
+      }
+    });
+
+    return risks;
+  }, [state.players, state.ownership, state.apiMatches, tournamentData.alive, tournamentData.groupTables]);
 
   const trophyChances = useMemo(() => {
     const N = 2000;
