@@ -1776,12 +1776,7 @@ export default function App() {
                     className={`rankingrow mysteamrow ${alive ? "" : "out"}`}
                     style={{ background: `${playerColor}18`, borderLeftColor: playerColor }}
                   >
-                    <span className="rankteam">
-                      {TEAMS[tid][1]} {TEAMS[tid][0]}
-                      {eliminationRisks[selected.id]?.find(r => r.tid === tid) && (
-                        <span className="atrisk-pill">AT RISK</span>
-                      )}
-                    </span>
+                    <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}{eliminationRisk[selected.id]?.some((r) => r.tid === tid) ? <span className="atriskpill">AT RISK</span> : null}</span>
                     <span>#{FIFA_RANKINGS[tid] || "—"}</span>
                     <b>{t.pts}</b>
                     <span>{gdText(t.gd)}</span>
@@ -2005,26 +2000,30 @@ export default function App() {
                   : "Tap update to fetch scores")}
             </span>
           </div>
-          {keyMatchup && (
-            <div className="keymatchup-card">
-              <div className="keymatchup-label">⚡ CRUCIAL FIXTURE</div>
-              <div className="keymatchup-title">KEY MATCHUP</div>
-              {keyMatchup.m.date && <div className="keymatchup-date">{new Date(keyMatchup.m.date).toLocaleString()}</div>}
-              <div className="keymatchup-teams">
-                <div className="keymatchup-team">
-                  <span className="keymatchup-flag">{flagForTeam(keyMatchup.m.homeCode, keyMatchup.m.homeName)}</span>
-                  <span className="keymatchup-teamname">{nameFor(keyMatchup.m.homeCode, keyMatchup.m.homeName)}</span>
-                  <span className="keymatchup-manager" style={{color: PLAYER_COLORS[keyMatchup.homeOwner.id]}}>{keyMatchup.homeOwner.name}</span>
-                </div>
-                <div className="keymatchup-vs">VS</div>
-                <div className="keymatchup-team">
-                  <span className="keymatchup-flag">{flagForTeam(keyMatchup.m.awayCode, keyMatchup.m.awayName)}</span>
-                  <span className="keymatchup-teamname">{nameFor(keyMatchup.m.awayCode, keyMatchup.m.awayName)}</span>
-                  <span className="keymatchup-manager" style={{color: PLAYER_COLORS[keyMatchup.awayOwner.id]}}>{keyMatchup.awayOwner.name}</span>
+          {keyMatchup && (() => {
+            const { match: km, homeOwner: kHome, awayOwner: kAway } = keyMatchup;
+            const kHomeFlag = flagForTeam(km.homeCode, km.homeName);
+            const kAwayFlag = flagForTeam(km.awayCode, km.awayName);
+            return (
+              <div className="keymatchupcard">
+                <div className="keymatchuplabel">CRUCIAL FIXTURE · KEY MATCHUP</div>
+                <div className="keymatchupdate">{km.date ? new Date(km.date).toLocaleString() : "Date TBC"} · {matchDisplayRound(km)}</div>
+                <div className="keymatchupteams">
+                  <div className="keymatchupteam">
+                    <span className="keymatchupflag">{kHomeFlag}</span>
+                    <span className="keymatchupname">{nameFor(km.homeCode, km.homeName)}</span>
+                    <span className="managerpill" style={{ background: `${kHome.color}33`, border: `1px solid ${kHome.color}`, color: kHome.color }}>{kHome.name}</span>
+                  </div>
+                  <div className="keymatchupvs">VS</div>
+                  <div className="keymatchupteam r">
+                    <span className="keymatchupflag">{kAwayFlag}</span>
+                    <span className="keymatchupname">{nameFor(km.awayCode, km.awayName)}</span>
+                    <span className="managerpill" style={{ background: `${kAway.color}33`, border: `1px solid ${kAway.color}`, color: kAway.color }}>{kAway.name}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           <div className="filtercollapse">
             <button className="clearfilterbtn filtertoggle" onClick={() => setFiltersOpen(!filtersOpen)}>
               {filtersOpen ? "Hide filters" : "Show filters"}
@@ -2136,9 +2135,11 @@ export default function App() {
           </div>
           <div className="subtle tableintro">Points · GD · alive teams</div>
           {simMode && (
-            <div className="simbanner">
-              <span>🔬 SIM MODE — results below are hypothetical</span>
-              <button className="clearfilterbtn" onClick={() => setSimOverrides({})}>Clear</button>
+            <div className="simmodebanner">
+              <span>SIM MODE — hypothetical results active</span>
+              {Object.keys(simOverrides).length > 0 && (
+                <button className="clearfilterbtn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => setSimOverrides({})}>Clear</button>
+              )}
             </div>
           )}
           {simMode && Object.keys(simOverrides).length > 0 && (
@@ -2157,7 +2158,10 @@ export default function App() {
               <span>Exp</span>
               <span>Pts</span>
             </div>
-            {board.map((p, i) => (
+            {board.map((p, i) => {
+              const atRiskTeams = eliminationRisk[p.id] || [];
+              const riskTitle = atRiskTeams.length > 0 ? `At risk: ${atRiskTeams.map((t) => t.teamName).join(", ")}` : "";
+              return (
               <div key={p.id}>
                 <button
                   className={`leaguegrow leaguerow ${i === 0 && p.pts > 0 ? "lead" : ""}`}
@@ -2165,12 +2169,7 @@ export default function App() {
                   onClick={() => setExpanded(expanded === p.id ? null : p.id)}
                 >
                   <span>{i + 1}</span>
-                  <span className="leaguename">
-                    {p.name}{i === 0 && leaderPts > 0 ? " 🏆" : ""}
-                    {eliminationRisks[p.id] && (
-                      <span className="atrisk-icon" title={`At risk: ${eliminationRisks[p.id].map(r => r.teamName).join(', ')}`}>⚠</span>
-                    )}
-                  </span>
+                  <span className="leaguename" title={riskTitle}>{p.name}{i === 0 && leaderPts > 0 ? " 🏆" : ""}{atRiskTeams.length > 0 ? <span className="riskalert" title={riskTitle}> ⚠</span> : null}</span>
                   <span>{p.gp}</span>
                   <span>{p.w}</span>
                   <span>{p.d}</span>
@@ -2201,7 +2200,8 @@ export default function App() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
           <PointsRaceChart />
           <PositionRaceChart />
@@ -2313,11 +2313,11 @@ const CSS = `
 .charthead{margin-left:0!important;padding-left:0!important}.glabel{margin-left:0!important;padding-left:0!important}
 
 /* Feature 1: Key Matchup card */
-.keymatchup-card{background:linear-gradient(135deg,#10271A,#0C1F15);border:2px solid #E8B33B66;border-radius:12px;padding:14px;margin-bottom:12px}.keymatchup-label{font-family:'Saira Condensed';font-size:11px;letter-spacing:.2em;color:#E8B33B;text-transform:uppercase;margin-bottom:2px}.keymatchup-title{font-family:'Saira Condensed';font-weight:800;font-size:22px;color:#F0EDE2;margin-bottom:6px;text-transform:uppercase}.keymatchup-date{font-size:11px;color:#9FBFA8;margin-bottom:10px}.keymatchup-teams{display:flex;align-items:center;gap:10px}.keymatchup-team{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center}.keymatchup-flag{font-size:28px;line-height:1}.keymatchup-teamname{font-size:13px;font-weight:700;color:#F0EDE2}.keymatchup-manager{font-size:12px;font-weight:800;font-family:'Saira Condensed';letter-spacing:.06em}.keymatchup-vs{font-family:'Saira Condensed';font-weight:800;font-size:20px;color:#9FBFA8;flex-shrink:0}
+.keymatchupcard{background:linear-gradient(135deg,#10271A,#0e2018);border:2px solid #E8B33B88;border-radius:12px;padding:12px 14px;margin-bottom:12px;box-shadow:0 0 18px #E8B33B18}.keymatchuplabel{font-family:'Saira Condensed';font-weight:800;letter-spacing:.18em;font-size:11px;color:#E8B33B;text-transform:uppercase;margin-bottom:4px}.keymatchupdate{font-size:11px;color:#9FBFA8;margin-bottom:10px}.keymatchupteams{display:flex;align-items:center;gap:8px}.keymatchupteam{flex:1;display:flex;flex-direction:column;gap:5px;align-items:flex-start}.keymatchupteam.r{align-items:flex-end;text-align:right}.keymatchupflag{font-size:24px;line-height:1}.keymatchupname{font-weight:900;font-size:13.5px;color:#F0EDE2}.keymatchupvs{font-family:'Saira Condensed';font-weight:800;font-size:20px;color:#E8B33B;padding:0 4px;flex:0 0 auto}
 
 /* Feature 2: Sim mode */
-.simbtn{background:#6FB8E8!important;color:#0C1F15!important}.simbtn.on{background:#E0635C!important;color:#F0EDE2!important}.simbanner{display:flex;align-items:center;justify-content:space-between;background:#6FB8E822;border:1px solid #6FB8E866;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:#6FB8E8;gap:8px}.simbadge{display:inline-block;background:#6FB8E8;color:#0C1F15;font-family:'Saira Condensed';font-weight:800;font-size:11px;letter-spacing:.14em;border-radius:999px;padding:3px 10px;margin-bottom:8px}.simbtnrow{display:flex;gap:5px;margin-top:8px;padding-top:8px;border-top:1px solid #ffffff0d}.simresultbtn{background:#0C1F15;border:1px solid #ffffff24;color:#9FBFA8;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:800;cursor:pointer;font-family:'Saira Condensed';letter-spacing:.08em}.simresultbtn.active{background:#6FB8E8;color:#0C1F15;border-color:#6FB8E8}.simresultbtn.clear{background:transparent;color:#E0635C;border-color:#E0635C44}
+.simmodebanner{background:#6FB8E822;border:1px solid #6FB8E888;border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#6FB8E8;font-weight:700}.simbadge{font-family:'Saira Condensed';font-weight:800;letter-spacing:.18em;font-size:11px;color:#6FB8E8;background:#6FB8E822;border:1px solid #6FB8E866;border-radius:999px;padding:4px 12px;margin-bottom:10px;text-align:center;text-transform:uppercase}.simbtnrow{display:flex;gap:6px;margin-top:8px;justify-content:center}.simbtn{background:#0C1F15;border:1px solid #ffffff22;color:#9FBFA8;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;transition:background .15s}.simbtn.active{background:#6FB8E8;color:#0C1F15;border-color:#6FB8E8;font-weight:900}
 
 /* Feature 3: Elimination risk */
-.atrisk-icon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;background:#E8B33B;color:#0C1F15;border-radius:50%;font-size:9px;margin-left:5px;cursor:help;line-height:1;vertical-align:middle}.atrisk-pill{display:inline-block;background:#E0635C;color:#F0EDE2;font-size:8px;font-weight:800;font-family:'Saira Condensed';letter-spacing:.1em;border-radius:999px;padding:2px 5px;margin-left:5px;vertical-align:middle}
+.riskalert{color:#E8A23B;font-size:12px;cursor:help}.atriskpill{font-size:9px;background:#E8A23B22;border:1px solid #E8A23B66;color:#E8A23B;border-radius:999px;padding:2px 6px;margin-left:5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle}
 `;
