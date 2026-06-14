@@ -222,18 +222,17 @@ const BASE_WORLD_CUP_ODDS = {
   CUW: 0.01,
 };
 
-function rawAdjustedCountryOdds(tid, stats, alive) {
+function rawAdjustedCountryOdds(tid, stats, alive, scheduleEase = 0.5) {
   if (!alive) return 0;
   const base = BASE_WORLD_CUP_ODDS[tid] ?? 0.01;
   const pts = stats?.pts || 0;
   const gd = stats?.gd || 0;
   const w = stats?.w || 0;
   const l = stats?.l || 0;
-  const performanceMultiplier = Math.max(
-    0.65,
-    Math.min(1.65, 1 + pts * 0.05 + gd * 0.03 + w * 0.04 - l * 0.03),
-  );
-  return base * performanceMultiplier;
+  const performanceFactor = pts * 0.08 + gd * 0.04 + w * 0.05 - l * 0.07;
+  const scheduleFactor = (scheduleEase - 0.5) * 0.5;
+  const multiplier = Math.max(0.3, Math.min(2.5, 1 + performanceFactor + scheduleFactor));
+  return base * multiplier;
 }
 
 
@@ -579,12 +578,27 @@ export default function App() {
 
 
   const countryOddsByTeam = useMemo(() => {
+    const remainingOpponents: Record<string, string[]> = {};
+    state.apiMatches
+      .filter((m) => m.homeCode && m.awayCode && !isFinished(m))
+      .forEach((m) => {
+        (remainingOpponents[m.homeCode] ||= []).push(m.awayCode);
+        (remainingOpponents[m.awayCode] ||= []).push(m.homeCode);
+      });
+
+    const scheduleEaseForTeam = (tid) => {
+      const opps = remainingOpponents[tid] || [];
+      if (!opps.length) return 0.5;
+      const avgRank = opps.reduce((sum, opp) => sum + (FIFA_RANKINGS[opp] || 150), 0) / opps.length;
+      return (avgRank - 1) / 210;
+    };
+
     const rawRows = TEAM_IDS.map((tid) => {
       const stats = tournamentData.teamStats[tid] || { pts: 0, gd: 0, gf: 0, w: 0, l: 0 };
       const alive = tournamentData.alive.has(tid);
       return {
         tid,
-        rawOdds: rawAdjustedCountryOdds(tid, stats, alive),
+        rawOdds: rawAdjustedCountryOdds(tid, stats, alive, scheduleEaseForTeam(tid)),
       };
     });
     const totalRaw = rawRows.reduce((sum, row) => sum + row.rawOdds, 0) || 1;
@@ -594,7 +608,7 @@ export default function App() {
         row.rawOdds > 0 ? (row.rawOdds / totalRaw) * 100 : 0,
       ]),
     );
-  }, [tournamentData]);
+  }, [tournamentData, state.apiMatches]);
 
   const expectedRemainingPointsForTeam = (tid) => {
     return state.apiMatches.reduce((sum, m) => {
