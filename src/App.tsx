@@ -460,6 +460,8 @@ export default function App() {
   const [resultGroupFilter, setResultGroupFilter] = useState("all");
   const [resultDateFilter, setResultDateFilter] = useState("");
   const [resultCountryFilter, setResultCountryFilter] = useState("all");
+  const [resultStatusFilter, setResultStatusFilter] = useState("all");
+  const [compactResults, setCompactResults] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
   const [editingDraft, setEditingDraft] = useState(false);
@@ -1004,9 +1006,13 @@ export default function App() {
         return false;
       }
 
+      if (resultStatusFilter === "finished" && !isFinished(m)) return false;
+      if (resultStatusFilter === "live" && !isLive(m)) return false;
+      if (resultStatusFilter === "future" && (isFinished(m) || isLive(m))) return false;
+
       return true;
     });
-  }, [state.apiMatches, resultFilter, resultGroupFilter, resultDateFilter, resultCountryFilter, state.ownership]);
+  }, [state.apiMatches, resultFilter, resultGroupFilter, resultDateFilter, resultCountryFilter, resultStatusFilter, state.ownership]);
 
   const countryFilterOptions = useMemo(
     () => TEAM_IDS.slice().sort((a, b) => TEAMS[a][0].localeCompare(TEAMS[b][0])),
@@ -1152,6 +1158,35 @@ export default function App() {
             )}
           </div>
         </div>
+      </div>
+    );
+  };
+
+  const CompactResultRow = ({ m }) => {
+    const homeFlag = flagForTeam(m.homeCode, m.homeName);
+    const awayFlag = flagForTeam(m.awayCode, m.awayName);
+    const homeOwner = ownerOf(m.homeCode);
+    const awayOwner = ownerOf(m.awayCode);
+    const hScore = typeof m.homeGoals === "number" ? m.homeGoals : "–";
+    const aScore = typeof m.awayGoals === "number" ? m.awayGoals : "–";
+    const statusClass = isFinished(m) ? "done" : isLive(m) ? "live" : "future";
+    const winnerCode = winningTeamCode(m);
+    const winnerOwner = winnerCode ? ownerOf(winnerCode) : null;
+    return (
+      <div
+        className="compactmatch"
+        style={winnerOwner ? { borderColor: winnerOwner.color } : undefined}
+      >
+        <span className={`grpbadge ${statusClass}`}>{m.status || "NS"}</span>
+        <span className="compacthome">
+          <span className="compactteam">{homeFlag} {nameFor(m.homeCode, m.homeName)}</span>
+          {homeOwner && <span className="compactowner" style={{ color: homeOwner.color }}>{homeOwner.name}</span>}
+        </span>
+        <span className="compactscore">{hScore}:{aScore}</span>
+        <span className="compactaway">
+          <span className="compactteam">{nameFor(m.awayCode, m.awayName)} {awayFlag}</span>
+          {awayOwner && <span className="compactowner" style={{ color: awayOwner.color }}>{awayOwner.name}</span>}
+        </span>
       </div>
     );
   };
@@ -1908,7 +1943,31 @@ export default function App() {
             >
               Today
             </button>
-            {(resultFilter !== "all" || resultGroupFilter !== "all" || resultDateFilter || resultCountryFilter !== "all") && (
+            <button
+              className={`clearfilterbtn todaybtn ${resultStatusFilter === "finished" ? "on" : ""}`}
+              onClick={() => setResultStatusFilter(resultStatusFilter === "finished" ? "all" : "finished")}
+            >
+              Done
+            </button>
+            <button
+              className={`clearfilterbtn todaybtn ${resultStatusFilter === "live" ? "on" : ""}`}
+              onClick={() => setResultStatusFilter(resultStatusFilter === "live" ? "all" : "live")}
+            >
+              Live
+            </button>
+            <button
+              className={`clearfilterbtn todaybtn ${resultStatusFilter === "future" ? "on" : ""}`}
+              onClick={() => setResultStatusFilter(resultStatusFilter === "future" ? "all" : "future")}
+            >
+              Upcoming
+            </button>
+            <button
+              className={`clearfilterbtn todaybtn ${compactResults ? "on" : ""}`}
+              onClick={() => setCompactResults((v) => !v)}
+            >
+              Compact
+            </button>
+            {(resultFilter !== "all" || resultGroupFilter !== "all" || resultDateFilter || resultCountryFilter !== "all" || resultStatusFilter !== "all") && (
               <button
                 className="clearfilterbtn"
                 onClick={() => {
@@ -1916,6 +1975,7 @@ export default function App() {
                   setResultGroupFilter("all");
                   setResultDateFilter("");
                   setResultCountryFilter("all");
+                  setResultStatusFilter("all");
                 }}
               >
                 Clear filters
@@ -1983,9 +2043,9 @@ export default function App() {
           {filteredMatches.length === 0 && (
             <div className="empty">No fixtures loaded yet.</div>
           )}
-          {filteredMatches.map((m) => (
-            <ResultRow key={m.id} m={m} />
-          ))}
+          {filteredMatches.map((m) =>
+            compactResults ? <CompactResultRow key={m.id} m={m} /> : <ResultRow key={m.id} m={m} />
+          )}
         </section>
       )}
 
@@ -2158,6 +2218,21 @@ const CSS = `
 @media(max-width:560px){.countryperfrow{grid-template-columns:minmax(80px,1.1fr) 42px 26px 30px 34px 40px 42px 36px!important;font-size:9.5px!important}.mysteamrow{grid-template-columns:minmax(76px,1.1fr) 32px 26px 28px 32px 38px 40px 36px!important;font-size:9.5px!important}.rankinglist.compact>.rankingrow:not(.countryperfrow):not(.mysteamrow):not(.opponentrow){grid-template-columns:28px minmax(88px,1.1fr) 36px 42px minmax(54px,.7fr);font-size:9.5px!important}.rankowner .managerpill{font-size:8.5px!important;padding:2px 4px!important}.oppchip{font-size:9.5px!important;padding:4px 6px!important}}
 
 .charthead{margin-left:0!important;padding-left:0!important}.glabel{margin-left:0!important;padding-left:0!important}
+
+.compactmatch{display:grid;grid-template-columns:38px 1fr 48px 1fr;gap:4px 8px;align-items:center;padding:7px 10px;border:1px solid #ffffff12;border-radius:8px;margin-bottom:5px;background:#10271A}
+.compacthome{display:flex;flex-direction:column;gap:1px;align-items:flex-end;min-width:0;overflow:hidden}
+.compactaway{display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden}
+.compactteam{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.compactowner{font-size:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;opacity:.9}
+.compactscore{font-family:'Saira Condensed';font-weight:800;font-size:20px;color:#E8B33B;text-align:center;white-space:nowrap}
+@media(max-width:560px){
+  .compactmatch{padding:5px 8px;gap:2px 5px;grid-template-columns:32px 1fr 42px 1fr}
+  .compacthome{flex-direction:row;align-items:center;justify-content:flex-end;gap:3px}
+  .compactaway{flex-direction:row;align-items:center;gap:3px}
+  .compactteam{font-size:11px}
+  .compactowner{font-size:9.5px}
+  .compactscore{font-size:16px}
+}
 
 @media(max-width:560px){
   .countryperf .countryperfrow>*:nth-child(5),
