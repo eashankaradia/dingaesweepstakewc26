@@ -424,6 +424,14 @@ function matchChannel(match) {
   return match?.channel || match?.tvChannel || "";
 }
 
+function fmtChannel(ch) {
+  if (!ch) return "";
+  const lower = ch.toLowerCase();
+  if (lower.startsWith("bbc")) return "BBC";
+  if (lower.startsWith("itv")) return "ITV";
+  return ch;
+}
+
 function winningTeamCode(match) {
   if (!isFinished(match)) return null;
   if (typeof match.homeGoals !== "number" || typeof match.awayGoals !== "number") return null;
@@ -1143,7 +1151,7 @@ export default function App() {
           {m.date && (
             <span className="city">{fmtDateTime(m.date)}</span>
           )}
-          {channel && <span className="channelpill">{channel}</span>}
+          {channel && <span className="channelpill">{fmtChannel(channel)}</span>}
         </div>
         <div className="scoreline">
           <div className="teamcell">
@@ -1186,7 +1194,6 @@ export default function App() {
     const statusClass = isFinished(m) ? "done" : isLive(m) ? "live" : "future";
     const winnerCode = winningTeamCode(m);
     const winnerOwner = winnerCode ? ownerOf(winnerCode) : null;
-    const channel = matchChannel(m);
     return (
       <div
         className="compactmatch"
@@ -1202,7 +1209,6 @@ export default function App() {
           <span className="compactteam">{nameFor(m.awayCode, m.awayName)} {awayFlag}</span>
           {awayOwner && <span className="compactowner" style={{ color: awayOwner.color }}>{awayOwner.name}</span>}
         </span>
-        {channel && <span className="compactchannel">{channel}</span>}
       </div>
     );
   };
@@ -1547,7 +1553,7 @@ export default function App() {
                   <span>{flagForTeam(m.homeCode, m.homeName)} {nameFor(m.homeCode, m.homeName)}</span>
                   <strong>{typeof m.homeGoals === "number" ? m.homeGoals : ""} : {typeof m.awayGoals === "number" ? m.awayGoals : ""}</strong>
                   <span>{nameFor(m.awayCode, m.awayName)} {flagForTeam(m.awayCode, m.awayName)}</span>
-                  <small>{m.status || "NS"}{matchChannel(m) ? ` · ${matchChannel(m)}` : ""}</small>
+                  <small>{m.status || "NS"}{matchChannel(m) ? ` · ${fmtChannel(matchChannel(m))}` : ""}</small>
                 </div>
               ))}
             </div>
