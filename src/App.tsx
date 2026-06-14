@@ -690,31 +690,25 @@ export default function App() {
 
     state.apiMatches.forEach((m) => {
       if (!m.homeCode || !m.awayCode) return;
-      if (!isFinished(m)) return;
-      if (typeof m.homeGoals !== "number" || typeof m.awayGoals !== "number")
-        return;
-      credit(m.homeCode, resultFor(m, "home"), m.homeGoals, m.awayGoals);
-      credit(m.awayCode, resultFor(m, "away"), m.awayGoals, m.homeGoals);
-    });
-
-    // Apply sim overrides for unfinished matches
-    state.apiMatches.forEach((m) => {
-      if (!m.homeCode || !m.awayCode) return;
-      if (isFinished(m)) return; // only unfinished
-      const key = `${m.homeCode}-${m.awayCode}`;
-      const override = simOverrides[key];
-      if (!override) return;
-      const homeOwnerPid = state.ownership[m.homeCode];
-      const awayOwnerPid = state.ownership[m.awayCode];
-      if (override === 'home') {
-        if (homeOwnerPid != null) { const row = byId[homeOwnerPid]; if (row) { row.pts += 3; row.w++; row.gp++; if (!row.teams[m.homeCode]) row.teams[m.homeCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.homeCode].pts += 3; row.teams[m.homeCode].w++; } }
-        if (awayOwnerPid != null) { const row = byId[awayOwnerPid]; if (row) { row.l++; row.gp++; if (!row.teams[m.awayCode]) row.teams[m.awayCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.awayCode].l++; } }
-      } else if (override === 'away') {
-        if (awayOwnerPid != null) { const row = byId[awayOwnerPid]; if (row) { row.pts += 3; row.w++; row.gp++; if (!row.teams[m.awayCode]) row.teams[m.awayCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.awayCode].pts += 3; row.teams[m.awayCode].w++; } }
-        if (homeOwnerPid != null) { const row = byId[homeOwnerPid]; if (row) { row.l++; row.gp++; if (!row.teams[m.homeCode]) row.teams[m.homeCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.homeCode].l++; } }
-      } else if (override === 'draw') {
-        if (homeOwnerPid != null) { const row = byId[homeOwnerPid]; if (row) { row.pts += 1; row.d++; row.gp++; if (!row.teams[m.homeCode]) row.teams[m.homeCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.homeCode].pts += 1; row.teams[m.homeCode].d++; } }
-        if (awayOwnerPid != null) { const row = byId[awayOwnerPid]; if (row) { row.pts += 1; row.d++; row.gp++; if (!row.teams[m.awayCode]) row.teams[m.awayCode] = {pts:0,w:0,d:0,l:0,gf:0,ga:0,gd:0}; row.teams[m.awayCode].pts += 1; row.teams[m.awayCode].d++; } }
+      if (isFinished(m)) {
+        if (typeof m.homeGoals !== "number" || typeof m.awayGoals !== "number") return;
+        credit(m.homeCode, resultFor(m, "home"), m.homeGoals, m.awayGoals);
+        credit(m.awayCode, resultFor(m, "away"), m.awayGoals, m.homeGoals);
+      } else {
+        const simKey = `${m.homeCode}-${m.awayCode}`;
+        const override = simOverrides[simKey];
+        if (override) {
+          if (override === "home") {
+            credit(m.homeCode, "w", 1, 0);
+            credit(m.awayCode, "l", 0, 1);
+          } else if (override === "draw") {
+            credit(m.homeCode, "d", 0, 0);
+            credit(m.awayCode, "d", 0, 0);
+          } else if (override === "away") {
+            credit(m.homeCode, "l", 0, 1);
+            credit(m.awayCode, "w", 1, 0);
+          }
+        }
       }
     });
 
@@ -729,67 +723,71 @@ export default function App() {
   }, [state.players, state.ownership, state.apiMatches, tournamentData.alive, simOverrides]);
 
   const keyMatchup = useMemo(() => {
+    const upcoming = state.apiMatches.filter(
+      (m) => m.homeCode && m.awayCode && !isFinished(m) && !isLive(m),
+    );
+
     let best = null;
     let bestScore = -Infinity;
-    state.apiMatches.forEach((m) => {
-      if (isFinished(m)) return;
+
+    upcoming.forEach((m) => {
       const homeOwner = ownerOf(m.homeCode);
       const awayOwner = ownerOf(m.awayCode);
       if (!homeOwner || !awayOwner) return;
       if (homeOwner.id === awayOwner.id) return;
-      const homePts = board.find((p) => p.id === homeOwner.id)?.pts ?? 0;
-      const awayPts = board.find((p) => p.id === awayOwner.id)?.pts ?? 0;
-      const pointsGap = Math.abs(homePts - awayPts);
-      const homeAlive = tournamentData.alive.has(m.homeCode);
-      const awayAlive = tournamentData.alive.has(m.awayCode);
-      const aliveBonus = (homeAlive && awayAlive) ? 2 : (homeAlive || awayAlive) ? 1 : 0;
-      if (aliveBonus === 0) return;
+
+      const homeRow = board.find((r) => r.id === homeOwner.id);
+      const awayRow = board.find((r) => r.id === awayOwner.id);
+      if (!homeRow || !awayRow) return;
+
+      const pointsGap = Math.abs(homeRow.pts - awayRow.pts);
+      const homeAlive = tournamentData.alive.has(m.homeCode) ? 1 : 0;
+      const awayAlive = tournamentData.alive.has(m.awayCode) ? 1 : 0;
+      const aliveBonus = homeAlive + awayAlive === 2 ? 2 : homeAlive + awayAlive === 1 ? 1 : 0;
+
       const score = (100 - pointsGap) * aliveBonus;
       if (score > bestScore) {
         bestScore = score;
-        best = { m, homeOwner, awayOwner };
+        best = { match: m, homeOwner, awayOwner, score };
       }
     });
+
     return best;
-  }, [state.apiMatches, board, tournamentData.alive]);
+  }, [state.apiMatches, board, tournamentData.alive, state.ownership, state.players]);
 
-  const eliminationRisks = useMemo(() => {
-    // For each player, check if any alive team has exactly 1 remaining group match AND is in 3rd or 4th in their group
-    const risks = {}; // playerId -> [{tid, teamName, flag, groupPos}]
-
+  const eliminationRisk = useMemo(() => {
+    // For each manager, check if any alive team has exactly 1 remaining group match
+    // and is currently in 3rd or 4th place in their group
+    const riskMap = {}; // pid -> [{tid, teamName, teamFlag}]
     state.players.forEach((p) => {
-      const ownedTeams = Object.keys(state.ownership).filter(tid => state.ownership[tid] === p.id);
-      const riskyTeams = [];
+      riskMap[p.id] = [];
+    });
 
-      ownedTeams.forEach((tid) => {
-        if (!tournamentData.alive.has(tid)) return;
-        const group = TEAMS[tid]?.[2];
-        if (!group) return;
+    TEAM_IDS.forEach((tid) => {
+      if (!tournamentData.alive.has(tid)) return;
+      const pid = state.ownership[tid];
+      if (pid == null) return;
 
-        // Count remaining group matches for this team
-        const remainingGroupMatches = state.apiMatches.filter(m =>
+      // Count remaining group stage matches
+      const remainingGroupMatches = state.apiMatches.filter(
+        (m) =>
           !isFinished(m) &&
           isGroupMatch(m) &&
-          (m.homeCode === tid || m.awayCode === tid)
-        );
-        if (remainingGroupMatches.length !== 1) return;
+          (m.homeCode === tid || m.awayCode === tid),
+      );
+      if (remainingGroupMatches.length !== 1) return;
 
-        // Check group position (0-indexed from groupTables)
-        const groupTable = tournamentData.groupTables[group];
-        if (!groupTable) return;
-        const pos = groupTable.findIndex(r => r.tid === tid);
-        if (pos < 2) return; // top 2 are safe, only flag 3rd (pos=2) and 4th (pos=3)
-
-        riskyTeams.push({ tid, teamName: TEAMS[tid][0], flag: TEAMS[tid][1], groupPos: pos + 1 });
-      });
-
-      if (riskyTeams.length > 0) {
-        risks[p.id] = riskyTeams;
+      // Check group position (3rd or 4th = index 2 or 3)
+      const group = TEAMS[tid][2];
+      const groupTable = tournamentData.groupTables[group] || [];
+      const posIdx = groupTable.findIndex((r) => r.tid === tid);
+      if (posIdx >= 2) {
+        riskMap[pid].push({ tid, teamName: TEAMS[tid][0], teamFlag: TEAMS[tid][1] });
       }
     });
 
-    return risks;
-  }, [state.players, state.ownership, state.apiMatches, tournamentData.alive, tournamentData.groupTables]);
+    return riskMap;
+  }, [state.players, state.ownership, state.apiMatches, tournamentData]);
 
   const trophyChances = useMemo(() => {
     const N = 2000;
@@ -1240,14 +1238,25 @@ export default function App() {
             )}
           </div>
         </div>
-        {simMode && !isFinished(m) && m.homeCode && m.awayCode && (
-          <div className="simbtnrow">
-            <button className={`simresultbtn ${simOverride === 'home' ? 'active' : ''}`} onClick={() => setSimOverrides(prev => ({...prev, [simKey]: 'home'}))}>H</button>
-            <button className={`simresultbtn ${simOverride === 'draw' ? 'active' : ''}`} onClick={() => setSimOverrides(prev => ({...prev, [simKey]: 'draw'}))}>D</button>
-            <button className={`simresultbtn ${simOverride === 'away' ? 'active' : ''}`} onClick={() => setSimOverrides(prev => ({...prev, [simKey]: 'away'}))}>A</button>
-            {simOverride && <button className="simresultbtn clear" onClick={() => setSimOverrides(prev => { const n={...prev}; delete n[simKey]; return n; })}>✕</button>}
-          </div>
-        )}
+        {simMode && !isFinished(m) && m.homeCode && m.awayCode && (() => {
+          const simKey2 = `${m.homeCode}-${m.awayCode}`;
+          const activeOverride = simOverrides[simKey2];
+          const setOverride = (val) => setSimOverrides((prev) => {
+            if (prev[simKey2] === val) {
+              const next = { ...prev };
+              delete next[simKey2];
+              return next;
+            }
+            return { ...prev, [simKey2]: val };
+          });
+          return (
+            <div className="simbtnrow">
+              <button className={`simbtn ${activeOverride === "home" ? "active" : ""}`} onClick={() => setOverride("home")}>H</button>
+              <button className={`simbtn ${activeOverride === "draw" ? "active" : ""}`} onClick={() => setOverride("draw")}>D</button>
+              <button className={`simbtn ${activeOverride === "away" ? "active" : ""}`} onClick={() => setOverride("away")}>A</button>
+            </div>
+          );
+        })()}
       </div>
     );
   };
@@ -2114,13 +2123,16 @@ export default function App() {
         <section className="pane">
           <div className="panehead">
             <h2>League Table</h2>
-            <button className="editdraftbtn" onClick={shareTableImageToWhatsApp}>Share table image</button>
-            <button
-              className={`editdraftbtn simbtn ${simMode ? 'on' : ''}`}
-              onClick={() => { setSimMode(!simMode); if (simMode) setSimOverrides({}); }}
-            >
-              {simMode ? 'Exit Sim' : 'Simulate'}
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="editdraftbtn"
+                style={{ background: simMode ? "#6FB8E8" : "#6FB8E8", color: "#0C1F15", opacity: simMode ? 1 : 0.7 }}
+                onClick={() => { setSimMode(!simMode); if (simMode) setSimOverrides({}); }}
+              >
+                {simMode ? "Exit Sim" : "Simulate"}
+              </button>
+              <button className="editdraftbtn" onClick={shareTableImageToWhatsApp}>Share table image</button>
+            </div>
           </div>
           <div className="subtle tableintro">Points · GD · alive teams</div>
           {simMode && (
