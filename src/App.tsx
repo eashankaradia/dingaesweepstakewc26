@@ -287,7 +287,7 @@ const DEFAULT_OWNERSHIP = {
   GHA: 0,
   ESP: 0,
   MAR: 0,
-  SWE: 0,
+  EGY: 0,
   COD: 0,
   URU: 0,
   NED: 0,
@@ -306,7 +306,7 @@ const DEFAULT_OWNERSHIP = {
   ECU: 2,
   NZL: 2,
   BEL: 2,
-  EGY: 2,
+  SWE: 2,
   SEN: 2,
   SUI: 3,
   AUS: 3,
@@ -335,6 +335,25 @@ const DEFAULT_OWNERSHIP = {
 };
 const STORE_KEY = "dingae-sweepstake-api-source-v1";
 
+const SWAP_LOG = [
+  {
+    id: "s1",
+    date: "2026-06-10",
+    parties: [
+      { player: "Vishal", pid: 1, gave: "ARG", received: "SCO" },
+      { player: "Shivam", pid: 3, gave: "SCO", received: "ARG" },
+    ],
+  },
+  {
+    id: "s2",
+    date: "2026-06-14",
+    parties: [
+      { player: "Eashan", pid: 0, gave: "SWE", received: "EGY" },
+      { player: "Dillan", pid: 2, gave: "EGY", received: "SWE" },
+    ],
+  },
+];
+
 const blankState = () => ({
   players: DEFAULT_PLAYERS.map((name, id) => ({ id, name })),
   ownership: { ...DEFAULT_OWNERSHIP },
@@ -347,6 +366,24 @@ const blankState = () => ({
 
 function flagForTeam(code, name, fallback = "🏳️") {
   return TEAMS[code]?.[1] || COUNTRY_NAME_FLAGS[name] || fallback;
+}
+
+function teamPtsSince(teamCode, dateStr, matches) {
+  const cutoff = new Date(dateStr).getTime();
+  let pts = 0;
+  for (const m of matches) {
+    if (!m.date || new Date(m.date).getTime() < cutoff) continue;
+    if (!isFinished(m)) continue;
+    if (typeof m.homeGoals !== "number" || typeof m.awayGoals !== "number") continue;
+    const isHome = m.homeCode === teamCode;
+    const isAway = m.awayCode === teamCode;
+    if (!isHome && !isAway) continue;
+    const scored = isHome ? m.homeGoals : m.awayGoals;
+    const conceded = isHome ? m.awayGoals : m.homeGoals;
+    if (scored > conceded) pts += 3;
+    else if (scored === conceded) pts += 1;
+  }
+  return pts;
 }
 
 function nameFor(code, fallback) {
@@ -489,12 +526,27 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [statsPlayer, setStatsPlayer] = useState("0");
+  const [editPassword, setEditPassword] = useState("");
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftSaveMsg, setDraftSaveMsg] = useState("");
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) setState((s) => ({ ...blankState(), ...JSON.parse(raw) }));
     } catch {}
+  }, []);
+
+  // Load canonical ownership from server (overrides localStorage)
+  useEffect(() => {
+    fetch("/api/draft")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ownership && typeof data.ownership === "object") {
+          setState((s) => ({ ...s, ownership: data.ownership }));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -1839,18 +1891,38 @@ export default function App() {
 
   const leaderPts = board[0]?.pts || 0;
 
+  const saveDraft = async (ownership) => {
+    setSavingDraft(true);
+    setDraftSaveMsg("");
+    try {
+      const res = await fetch("/api/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: editPassword, ownership }),
+      });
+      setDraftSaveMsg(res.ok ? "Draft saved ✓" : "Save failed");
+    } catch {
+      setDraftSaveMsg("Could not reach server");
+    }
+    setSavingDraft(false);
+  };
+
   const openEditDraft = () => {
     if (editingDraft) {
+      saveDraft(state.ownership);
       setEditingDraft(false);
+      setEditPassword("");
       return;
     }
     setPasswordInput("");
     setPasswordError("");
+    setDraftSaveMsg("");
     setShowPasswordModal(true);
   };
 
   const unlockDraftEditing = () => {
     if (passwordInput === "dingus") {
+      setEditPassword(passwordInput);
       setEditingDraft(true);
       setShowPasswordModal(false);
       setPasswordInput("");
@@ -1879,12 +1951,12 @@ export default function App() {
         <section className="pane">
           <div className="panehead">
             <h2>Draft</h2>
-            <button
-              className="editdraftbtn"
-              onClick={openEditDraft}
-            >
-              {editingDraft ? "Done editing" : "Edit draft"}
-            </button>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+              <button className="editdraftbtn" onClick={openEditDraft}>
+                {savingDraft ? "Saving…" : editingDraft ? "Done editing" : "Edit draft"}
+              </button>
+              {draftSaveMsg && <span className="draftsavemsg">{draftSaveMsg}</span>}
+            </div>
           </div>
           {state.players.map((p) => (
             <div key={p.id} className="lockcard draftmanagercard" style={{ background: `${PLAYER_COLORS[p.id]}18`, borderLeft: `4px solid ${PLAYER_COLORS[p.id]}` }}>
@@ -1930,6 +2002,44 @@ export default function App() {
             </div>
           ))}
           <DraftRankingVisual />
+
+          <div className="swaplog">
+            <div className="swaplog-hd">Trade History</div>
+            {SWAP_LOG.map((swap) => {
+              const fmtDate = new Date(swap.date).toLocaleDateString("en-GB", {
+                day: "numeric", month: "short", year: "numeric",
+              });
+              return (
+                <div key={swap.id} className="swapcard">
+                  <div className="swapcard-date">{fmtDate}</div>
+                  {swap.parties.map((party, i) => {
+                    const opponent = swap.parties[1 - i];
+                    const gavePts = teamPtsSince(party.gave, swap.date, state.apiMatches);
+                    const recPts = teamPtsSince(party.received, swap.date, state.apiMatches);
+                    const net = recPts - gavePts;
+                    const color = PLAYER_COLORS[party.pid];
+                    return (
+                      <div key={party.player} className="swaprow" style={{ borderLeftColor: color }}>
+                        <span className="swapname" style={{ color }}>{party.player}</span>
+                        <span className="swapgave">
+                          gave {TEAMS[party.gave]?.[1]} {TEAMS[party.gave]?.[0]}
+                          <span className="swappointtag">{gavePts}pts → {opponent.player}</span>
+                        </span>
+                        <span className="swaparr">→</span>
+                        <span className="swaprecd">
+                          got {TEAMS[party.received]?.[1]} {TEAMS[party.received]?.[0]}
+                          <span className="swappointtag">{recPts}pts</span>
+                        </span>
+                        <span className={`swapnet ${net > 0 ? "pos" : net < 0 ? "neg" : "zero"}`}>
+                          {net > 0 ? "+" : ""}{net} pts
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
         </section>
       )}
 
@@ -2252,4 +2362,20 @@ const CSS = `
   .countryperf .countryperfrow>*:nth-child(6){display:none!important}
   .countryperf .countryperfrow{grid-template-columns:minmax(88px,1.35fr) minmax(48px,.7fr) 26px 28px 44px 38px!important}
 }
+
+.draftsavemsg{font-size:11px;color:#8BA898;min-height:16px}
+.swaplog{margin-top:28px;padding-top:20px;border-top:1px solid #ffffff14}
+.swaplog-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#8BA898;margin-bottom:14px}
+.swapcard{background:#0E2318;border:1px solid #ffffff10;border-radius:10px;padding:13px 14px;margin-bottom:10px}
+.swapcard-date{font-size:11px;color:#8BA898;font-weight:700;letter-spacing:.05em;margin-bottom:10px}
+.swaprow{display:flex;align-items:center;gap:6px;padding:7px 10px;border-left:3px solid #fff3;border-radius:0 6px 6px 0;background:#00000020;margin-bottom:6px;flex-wrap:wrap;row-gap:4px}
+.swaprow:last-child{margin-bottom:0}
+.swapname{font-size:12px;font-weight:800;min-width:52px;flex-shrink:0}
+.swapgave,.swaprecd{font-size:12px;color:#C8D8CC;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.swaparr{color:#8BA898;font-size:13px;flex-shrink:0}
+.swappointtag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:#ffffff10;color:#C8D8CC;white-space:nowrap}
+.swapnet{font-size:13px;font-weight:900;margin-left:auto;flex-shrink:0;white-space:nowrap;padding:3px 8px;border-radius:6px}
+.swapnet.pos{color:#6BC17A;background:#6BC17A18}
+.swapnet.neg{color:#FF6B6B;background:#FF6B6B18}
+.swapnet.zero{color:#8BA898;background:#ffffff08}
 `;
