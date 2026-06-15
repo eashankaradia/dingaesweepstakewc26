@@ -1936,18 +1936,17 @@ export default function App() {
     <div className="app">
       <style>{CSS}</style>
       <header className="hero">
-        <div className="eyebrow">WORLD CUP ‘26</div>
+        <div className="herofoot">
+          <div className="eyebrow">WORLD CUP ‘26</div>
+          <button className="syncbtn herorefresh" onClick={runSync} disabled={!canRefresh}>
+            {refreshButtonText}
+          </button>
+        </div>
         <h1>
           DINGAE
           <br />
           <span>SWEEPSTAKE</span>
         </h1>
-        <div className="herofoot">
-          <div className="rules">6 managers · 8 teams each · Win 3 — Draw 1 — Loss 0</div>
-          <button className="syncbtn herorefresh" onClick={runSync} disabled={!canRefresh}>
-            {refreshButtonText}
-          </button>
-        </div>
       </header>
 
       {tab === "draft" && (
