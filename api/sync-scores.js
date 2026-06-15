@@ -50,6 +50,8 @@ const TEAM_ALIASES = {
   "Saudi Arabia": "KSA",
   "Cape Verde": "CPV",
   "Cape Verde Island": "CPV",
+  "Cape Verde Islands": "CPV",
+  "Cabo Verde": "CPV",
   France: "FRA",
   Senegal: "SEN",
   Norway: "NOR",
