@@ -1227,50 +1227,37 @@ export default function App() {
     const kickoffTime = m.date ? new Date(m.date).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
     return (
       <div
-        className={`match ${isExp ? "match-expanded" : ""} ${winnerOwner ? "managerwin" : ""}`}
-        style={winnerOwner ? { borderColor: winnerOwner.color, background: `${winnerOwner.color}0E` } : undefined}
+        className={`match ${winnerOwner ? "managerwin" : ""}`}
+        style={winnerOwner ? { borderLeftColor: winnerOwner.color } : undefined}
         onClick={() => setExpandedMatch(isExp ? null : m.id)}
       >
-        <div className="matchrow1">
-          <span className={`grpbadge ${statusClass}`}>{m.status || "NS"}</span>
-          <div className="matchteams">
-            <span className="mteam home">
-              <span className="mflag">{homeFlag}</span>
-              <span className="mname">{nameFor(m.homeCode, m.homeName)}</span>
-            </span>
-            <span className="mscore">
-              <span>{hScore}</span>
-              <span className="mcolon">:</span>
-              <span>{aScore}</span>
-            </span>
-            <span className="mteam away">
-              <span className="mname">{nameFor(m.awayCode, m.awayName)}</span>
-              <span className="mflag">{awayFlag}</span>
-            </span>
-          </div>
-          {kickoffTime && <span className="matchtime">{kickoffTime}</span>}
-        </div>
-        <div className="matchrow2">
-          <span className="mmanager">
-            {homeOwner ? <ManagerPill player={homeOwner} small /> : <span className="owner none">—</span>}
+        <div className="matchline">
+          <span className={`mbadge ${statusClass}`}>{m.status || "NS"}</span>
+          <span className="ml-home">
+            <span className="ml-flag">{homeFlag}</span>
+            <span className="ml-name">{nameFor(m.homeCode, m.homeName)}</span>
           </span>
-          <span className="mxpts">{homeExp} · {awayExp} xPts</span>
-          <span className="mmanager away">
-            {awayOwner ? <ManagerPill player={awayOwner} small /> : <span className="owner none">—</span>}
+          <span className="ml-score">{hScore}–{aScore}</span>
+          <span className="ml-away">
+            <span className="ml-name">{nameFor(m.awayCode, m.awayName)}</span>
+            <span className="ml-flag">{awayFlag}</span>
           </span>
+          {(homeOwner || awayOwner) && (
+            <span className="ml-managers">
+              {homeOwner && <span className="ml-mgr" style={{ color: homeOwner.color }}>{homeOwner.name}</span>}
+              {homeOwner && awayOwner && <span className="ml-dot">·</span>}
+              {awayOwner && <span className="ml-mgr" style={{ color: awayOwner.color }}>{awayOwner.name}</span>}
+            </span>
+          )}
+          {kickoffTime && !homeOwner && !awayOwner && <span className="ml-time">{kickoffTime}</span>}
         </div>
         {isExp && (
           <div className="matchdetail">
-            <div className="matchdetailrow">
-              <span className="city">{matchDisplayRound(m)}</span>
-              {m.date && <span className="city">{fmtDateTime(m.date)}</span>}
-              {channel && (channelLogoSrc(channel)
-                ? <img src={channelLogoSrc(channel)} alt={fmtChannel(channel)} className="channellogo" />
-                : <span className="channelpill">{fmtChannel(channel)}</span>
-              )}
-            </div>
-            {(!m.homeCode || !m.awayCode) && (
-              <span className="city">Unmapped: {m.homeName} vs {m.awayName}</span>
+            <span className="city">{matchDisplayRound(m)}{m.date ? ` · ${fmtDateTime(m.date)}` : ""}</span>
+            <span className="city">xPts {homeExp} · {awayExp}</span>
+            {channel && (channelLogoSrc(channel)
+              ? <img src={channelLogoSrc(channel)} alt={fmtChannel(channel)} className="channellogo" />
+              : <span className="channelpill">{fmtChannel(channel)}</span>
             )}
           </div>
         )}
@@ -1534,21 +1521,30 @@ export default function App() {
 
   const OutcomeDots = ({ playerId = null }) => {
     const players = playerId == null ? state.players : state.players.filter((p) => p.id === Number(playerId));
-    const labelFor = { w: "Win", d: "Draw", l: "Loss", future: "Not played" };
     return (
       <div className="chartbox">
-        <div className="charthead"><div><div className="glabel">RESULT DOTS</div><div className="subtle">Green win · orange draw · red loss · grey not played</div></div></div>
-        <div className="dotsgrid">
-          {players.map((p) => (
-            <div
-              key={p.id}
-              className="dotrow managerdotrow"
-              style={{ background: `${PLAYER_COLORS[p.id]}22` }}
-            >
-              <span className="dotlabel">{p.name}</span>
-              <span className="dotsline">{(outcomeMatrix[p.id] || []).map((o, idx) => <span key={idx} title={`${labelFor[o.result]} — ${nameFor(o.team)}`} className={`outcomedot ${o.result}`} />)}</span>
-            </div>
-          ))}
+        <div className="charthead"><div><div className="glabel">RESULTS</div><div className="subtle">Wins · Draws · Losses · Remaining</div></div></div>
+        <div className="barslist">
+          {players.map((p) => {
+            const outcomes = outcomeMatrix[p.id] || [];
+            const wins = outcomes.filter((o) => o.result === "w").length;
+            const draws = outcomes.filter((o) => o.result === "d").length;
+            const losses = outcomes.filter((o) => o.result === "l").length;
+            const future = outcomes.filter((o) => o.result === "future").length;
+            const total = wins + draws + losses + future;
+            if (total === 0) return null;
+            return (
+              <div key={p.id} className="barsrow">
+                <span className="barslabel" style={{ color: PLAYER_COLORS[p.id] }}>{p.name}</span>
+                <div className="barstrack">
+                  {wins > 0 && <span className="barsseg w" style={{ flex: wins }}><b>W{wins}</b></span>}
+                  {draws > 0 && <span className="barsseg d" style={{ flex: draws }}><b>D{draws}</b></span>}
+                  {losses > 0 && <span className="barsseg l" style={{ flex: losses }}><b>L{losses}</b></span>}
+                  {future > 0 && <span className="barsseg future" style={{ flex: future }} />}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -1836,14 +1832,11 @@ export default function App() {
         </div>
 
         <div className="chartbox">
-          <div className="charthead"><div><div className="glabel">{selected.name}'S TEAMS</div><div className="subtle">World Cup odds, FIFA ranking, points and goal difference</div></div></div>
+          <div className="charthead"><div><div className="glabel">{selected.name}'S TEAMS</div><div className="subtle">Points · Base odds · Current odds · Change</div></div></div>
           <div className="rankinglist compact mysteamtable">
             <div className="rankingrow rankinghead mysteamrow">
               <span>Team</span>
-              <span>FIFA</span>
               <span>Pts</span>
-              <span>GD</span>
-              <span>Exp</span>
               <span>Base</span>
               <span>Odds</span>
               <span>Chg</span>
@@ -1857,7 +1850,6 @@ export default function App() {
                 const odds = countryOddsByTeam[tid] || 0;
                 const baseOdds = baseOddsForTeam(tid);
                 const oddsChange = oddsChangeForTeam(tid);
-                const expPts = expectedRemainingPointsForTeam(tid);
                 return (
                   <div
                     key={tid}
@@ -1865,10 +1857,7 @@ export default function App() {
                     style={{ background: `${playerColor}18`, borderLeftColor: playerColor }}
                   >
                     <span className="rankteam">{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
-                    <span>#{FIFA_RANKINGS[tid] || "—"}</span>
                     <b>{t.pts}</b>
-                    <span>{gdText(t.gd)}</span>
-                    <span>{expPts.toFixed(1)}</span>
                     <span>{baseOdds.toFixed(2)}%</span>
                     <b>{odds.toFixed(2)}%</b>
                     <span className={oddsChange >= 0 ? "goodtext" : "badtext"}>{oddsChange >= 0 ? "+" : ""}{oddsChange.toFixed(2)}%</span>
@@ -1879,12 +1868,8 @@ export default function App() {
         </div>
 
         <div className="chartbox">
-          <div className="charthead"><div><div className="glabel">MY OPPONENTS</div><div className="subtle">Past and upcoming opponents for each of {selected.name}'s teams</div></div></div>
-          <div className="rankinglist opponentslist">
-            <div className="rankingrow rankinghead opponentrow">
-              <span>Team</span>
-              <span>Opponents</span>
-            </div>
+          <div className="charthead"><div><div className="glabel">MY OPPONENTS</div><div className="subtle">Flag + W/D/L for each match</div></div></div>
+          <div className="oppteams">
             {teams
               .slice()
               .sort((a, b) => (FIFA_RANKINGS[a] || 999) - (FIFA_RANKINGS[b] || 999))
@@ -1895,17 +1880,21 @@ export default function App() {
                   .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
                   .map((m) => {
                     const opp = m.homeCode === tid ? m.awayCode : m.homeCode;
-                    return { match: m, opp, result: resultClassForTeam(m, tid), label: resultLabelForTeam(m, tid) };
+                    return { opp, result: resultClassForTeam(m, tid), label: resultLabelForTeam(m, tid) };
                   });
                 return (
-                  <div key={tid} className={`rankingrow opponentrow ${tournamentData.alive.has(tid) ? "" : "out"}`}>
-                    <span>{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
+                  <div key={tid} className={`oppteamrow ${tournamentData.alive.has(tid) ? "" : "out"}`}>
+                    <span className="oppteamlabel">
+                      <span className="oppflag">{TEAMS[tid][1]}</span>
+                      <span className="oppteamname">{TEAMS[tid][0]}</span>
+                    </span>
                     <span className="opponentchips">
                       {opponents.length ? opponents.map((o, i) => (
                         <em key={i} className={`oppchip ${o.result}`} title={nameFor(o.opp)}>
-                          {TEAMS[o.opp]?.[1] || "🏳️"}
+                          <span>{TEAMS[o.opp]?.[1] || "🏳️"}</span>
+                          {o.result !== "future" && <b>{o.label}</b>}
                         </em>
-                      )) : <em className="oppchip future">None loaded</em>}
+                      )) : <em className="oppchip future">—</em>}
                     </span>
                   </div>
                 );
@@ -2341,19 +2330,14 @@ export default function App() {
 
       <nav className="tabbar">
         {[
-          ["draft", "Draft", "📋"],
-          ["results", "Results", "⚽"],
-          ["table", "Table", "🏆"],
-          ["tournament", "Tourney", "🗂"],
-          ["stats", "My Stats", "📊"],
-        ].map(([k, l, icon]) => (
-          <button
-            key={k}
-            className={tab === k ? "on" : ""}
-            onClick={() => setTab(k)}
-          >
-            <span className="tabicon">{icon}</span>
-            <span className="tablabel">{l}</span>
+          ["draft", "Draft"],
+          ["results", "Results"],
+          ["table", "Table"],
+          ["tournament", "Tournament"],
+          ["stats", "My Stats"],
+        ].map(([k, l]) => (
+          <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
+            {l}
           </button>
         ))}
       </nav>
@@ -2362,325 +2346,326 @@ export default function App() {
 }
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;800&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900&display=swap');
 
 /* ── Reset & base ── */
 *{box-sizing:border-box;margin:0;padding:0}
-.app{min-height:100vh;background:#091611;color:#F0EDE2;font-family:Inter,system-ui,sans-serif;font-size:14px;padding-bottom:80px}
+.app{min-height:100vh;background:#080F0C;color:#E8EDE6;font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;padding-bottom:52px}
 
 /* ── Hero header ── */
-.hero{background:linear-gradient(160deg,#0F2318 0%,#0A1812 100%);padding:12px 14px 0;border-bottom:1px solid #1E3528;position:sticky;top:0;z-index:100}
-.herofoot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:10px}
-h1{font-family:'Saira Condensed';font-weight:800;font-size:28px;line-height:1;color:#E8B33B;letter-spacing:.02em;text-shadow:0 0 30px #E8B33B33}
-h1 span{color:#E8B33B88;font-size:22px}
+.hero{background:#0C1810;padding:10px 14px 0;border-bottom:1px solid #1A2C1E;position:sticky;top:0;z-index:100}
+.herofoot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:9px}
+h1{font-weight:900;font-size:20px;line-height:1;color:#E8B33B;letter-spacing:-.01em}
+h1 span{color:#7A9A88;font-weight:600;font-size:15px;letter-spacing:.02em}
 .herosync{display:flex;align-items:center;gap:6px;flex-shrink:0}
-.herosync .syncmsg{font-size:10px;color:#4A6A56;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
-.herorefresh{font-size:17px;padding:5px 11px;background:#E8B33B;color:#0A1812;border:0;border-radius:9px;cursor:pointer;line-height:1;font-weight:900;box-shadow:0 2px 10px #E8B33B44}
-.herorefresh:disabled{background:#1A2E20;color:#3A5A48;cursor:not-allowed;box-shadow:none}
+.herosync .syncmsg{font-size:10px;color:#3A5A48;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.herorefresh{font-size:15px;padding:5px 10px;background:#E8B33B;color:#0A1812;border:0;border-radius:7px;cursor:pointer;line-height:1;font-weight:800}
+.herorefresh:disabled{background:#162212;color:#2A4A38;cursor:not-allowed}
 
 /* ── Score Ticker ── */
-.scoreticker{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;border-top:1px solid #1E3528;margin:0 -14px}
+.scoreticker{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;border-top:1px solid #1A2C1E;margin:0 -14px}
 .scoreticker::-webkit-scrollbar{display:none}
-.tickertrack{display:flex;gap:0;padding:0 14px;align-items:stretch;min-width:max-content}
-.tickeritem{display:flex;align-items:center;gap:5px;padding:7px 10px;background:transparent;border:0;border-right:1px solid #1A2E20;color:#8BA898;cursor:pointer;font-size:12px;white-space:nowrap;flex-shrink:0;transition:background .12s}
+.tickertrack{display:flex;align-items:stretch;min-width:max-content}
+.tickeritem{display:flex;align-items:center;gap:4px;padding:6px 10px;background:transparent;border:0;border-right:1px solid #162212;color:#7A9A88;cursor:pointer;font-size:11px;white-space:nowrap;flex-shrink:0}
 .tickeritem:last-child{border-right:0}
-.tickeritem:hover{background:#0F2019}
 .tickeritem.live{color:#E0635C}
-.tickerflag{font-size:14px;line-height:1}
-.tickerscore{font-family:'Saira Condensed';font-weight:800;font-size:14px;color:#E8B33B;min-width:28px;text-align:center}
-.tickeritem.live .tickerscore{color:#E0635C;animation:livepulse 1.8s ease-in-out infinite}
+.tickerflag{font-size:13px;line-height:1}
+.tickerscore{font-weight:700;font-size:12px;color:#E8B33B;min-width:26px;text-align:center;font-variant-numeric:tabular-nums}
+.tickeritem.live .tickerscore{color:#E0635C}
 
 /* ── Pane & headings ── */
 .pane{padding:12px 14px}
-.panehead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
-h2{font-family:'Saira Condensed';font-weight:800;font-size:20px;text-transform:uppercase;color:#F0EDE2;letter-spacing:.06em}
-.subtle,.hintline,.city{font-size:11px;color:#5A7A68}
+.panehead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+h2{font-weight:800;font-size:17px;color:#E8EDE6;letter-spacing:-.02em}
+.subtle,.hintline,.city{font-size:11px;color:#4A6A56}
 
 /* ── Cards base ── */
-.lockcard,.board,.bracketbox,.chartbox{background:#0F2019;border:1px solid #1E3528;border-radius:12px;padding:12px;margin-bottom:8px;box-shadow:0 2px 12px rgba(0,0,0,0.3)}
-.groupbox{background:#0F2019;border:1px solid #1E3528;border-radius:12px;overflow:hidden;margin-bottom:8px}
+.lockcard,.board,.bracketbox,.chartbox{background:#0D1C12;border:1px solid #1A2C1E;border-radius:10px;padding:12px;margin-bottom:0;box-shadow:none}
+.chartbox{margin-top:24px}
+.groupbox{background:#0D1C12;border:1px solid #1A2C1E;border-radius:10px;overflow:hidden;margin-bottom:0}
 
 /* ── Buttons ── */
-.editdraftbtn{background:#E8B33B;color:#0A1812;border:0;border-radius:9px;padding:8px 14px;font-weight:800;cursor:pointer;font-size:12px;box-shadow:0 2px 6px #E8B33B33;white-space:nowrap}
-.syncbtn{background:#E8B33B;color:#0A1812;border:0;border-radius:9px;padding:8px 14px;font-weight:800;cursor:pointer}
-.syncbtn:disabled{opacity:0.4;cursor:not-allowed;background:#1E3528;color:#4A6A56;box-shadow:none}
-.clearfilterbtn{background:transparent;border:1px solid #1E3528;color:#8BA898;border-radius:9px;padding:8px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
+.editdraftbtn{background:#E8B33B;color:#0A1812;border:0;border-radius:7px;padding:7px 13px;font-weight:700;cursor:pointer;font-size:12px;white-space:nowrap}
+.syncbtn{background:#E8B33B;color:#0A1812;border:0;border-radius:7px;padding:7px 13px;font-weight:700;cursor:pointer}
+.syncbtn:disabled{opacity:0.4;cursor:not-allowed;background:#1A2C1E;color:#3A5A48}
+.clearfilterbtn{background:transparent;border:1px solid #1A2C1E;color:#6A8A78;border-radius:7px;padding:7px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
 
 /* ── Manager pills ── */
-.managerpill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:3px 9px;font-weight:800;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;letter-spacing:.02em;text-transform:uppercase}
-.managerpill.small{font-size:10px;padding:2px 7px}
-.managerpill.none{background:#1A2E20;color:#4A6A56;border:1px solid #1E3528}
+.managerpill{display:inline-flex;align-items:center;justify-content:center;border-radius:5px;padding:2px 7px;font-weight:700;font-size:10px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;letter-spacing:.04em;text-transform:uppercase}
+.managerpill.small{font-size:9px;padding:1px 5px}
+.managerpill.none{background:#162212;color:#3A5A48;border:1px solid #1A2C1E}
 
-/* ── Match cards (new compact design) ── */
-.match{background:#0F2019;border:1px solid #1E3528;border-radius:10px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:border-color .12s,background .12s;-webkit-tap-highlight-color:transparent}
-.match:hover,.match:active{border-color:#2A4A38;background:#112219}
-.match.match-expanded{border-color:#2A4A38}
-.match.managerwin{box-shadow:0 2px 14px rgba(0,0,0,0.35)}
-.matchrow1{display:flex;align-items:center;gap:7px;min-width:0}
-.matchteams{flex:1;display:flex;align-items:center;gap:6px;min-width:0}
-.mteam{display:flex;align-items:center;gap:4px;min-width:0;flex:1}
-.mteam.away{flex-direction:row-reverse}
-.mflag{font-size:15px;flex-shrink:0;line-height:1}
-.mname{font-size:12px;font-weight:700;color:#F0EDE2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.mscore{font-family:'Saira Condensed';font-weight:800;font-size:20px;color:#E8B33B;display:flex;align-items:center;gap:3px;flex-shrink:0;min-width:44px;justify-content:center}
-.mcolon{color:#4A6A56;font-size:14px}
-.matchtime{font-size:10px;color:#4A6A56;flex-shrink:0;white-space:nowrap;font-weight:600}
-.matchrow2{display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:4px}
-.mmanager{flex:1;display:flex;align-items:center}
-.mmanager.away{justify-content:flex-end}
-.mxpts{font-size:10px;color:#3A5A48;text-align:center;flex-shrink:0;white-space:nowrap}
-.matchdetail{margin-top:8px;padding-top:8px;border-top:1px solid #1A2E20;display:flex;flex-direction:column;gap:5px}
-.matchdetailrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+/* ── Match cards — true single row ── */
+.match{background:#0D1C12;border:1px solid #1A2C1E;border-left:3px solid transparent;border-radius:6px;padding:9px 10px;margin-bottom:3px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.match.managerwin{border-left-width:3px}
+.matchline{display:flex;align-items:center;gap:5px;overflow:hidden;min-width:0}
+.mbadge{font-size:9px;letter-spacing:.04em;padding:2px 5px;border-radius:3px;font-weight:700;flex-shrink:0;white-space:nowrap;text-transform:uppercase}
+.mbadge.done{background:#1A3018;color:#3AB860}
+.mbadge.live{background:#3A1510;color:#E05050;animation:livepulse 1.8s ease-in-out infinite}
+.mbadge.future{background:#0F1A12;color:#3A5A48}
+@keyframes livepulse{0%,100%{opacity:1}50%{opacity:.5}}
+.ml-home{display:flex;align-items:center;gap:3px;flex:1;min-width:0;overflow:hidden}
+.ml-away{display:flex;align-items:center;gap:3px;flex-direction:row-reverse;flex:1;min-width:0;overflow:hidden}
+.ml-flag{font-size:14px;flex-shrink:0;line-height:1}
+.ml-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:#E8EDE6}
+.ml-away .ml-name{text-align:right}
+.ml-score{font-size:15px;font-weight:800;color:#E8B33B;white-space:nowrap;flex-shrink:0;min-width:42px;text-align:center;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.ml-managers{display:flex;align-items:center;gap:2px;flex-shrink:0;max-width:84px;overflow:hidden}
+.ml-mgr{font-size:9px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:uppercase;letter-spacing:.04em;max-width:36px;flex-shrink:1}
+.ml-dot{font-size:8px;color:#2A4A38;flex-shrink:0}
+.ml-time{font-size:9px;color:#3A5A48;flex-shrink:0;white-space:nowrap;font-weight:600;font-variant-numeric:tabular-nums}
+.matchdetail{margin-top:7px;padding-top:7px;border-top:1px solid #162212;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 
-/* ── Status badges ── */
-.grpbadge{font-family:'Saira Condensed';font-size:10px;letter-spacing:.12em;background:#1E3528;color:#4A6A56;border-radius:4px;padding:2px 6px;font-weight:800;flex-shrink:0}
-.grpbadge.done{background:#1A3018;color:#4AB865}
-.grpbadge.live{background:#3A1A18;color:#E0635C;animation:livepulse 1.8s ease-in-out infinite}
-@keyframes livepulse{0%,100%{box-shadow:0 0 0 0 #E0635C44}50%{box-shadow:0 0 0 4px #E0635C00}}
-.grpbadge.future{background:#1E3528;color:#4A6A56}
-.owner{font-size:10px;display:inline-flex;align-items:center;color:#4A6A56}
-.owner.none{color:#2A4A38}
+/* ── Status badges (used in group tables) ── */
+.grpbadge{font-size:9px;letter-spacing:.06em;background:#1A2C1E;color:#3A5A48;border-radius:3px;padding:2px 5px;font-weight:700;flex-shrink:0;text-transform:uppercase}
+.grpbadge.done{background:#1A3018;color:#3AB860}
+.grpbadge.live{background:#3A1510;color:#E05050}
+.grpbadge.future{background:#0F1A12;color:#3A5A48}
+.owner{font-size:9px;display:inline-flex;align-items:center;color:#3A5A48}
+.owner.none{color:#243820}
 
-/* ── Compact match rows ── */
-.compactmatch{display:grid;grid-template-columns:38px 1fr 48px 1fr;gap:4px 8px;align-items:center;padding:8px 10px;border:1px solid #1E3528;border-radius:8px;margin-bottom:5px;background:#0F2019}
+/* ── Compact match rows (same as main match row) ── */
+.compactmatch{display:grid;grid-template-columns:36px 1fr 44px 1fr;gap:3px 6px;align-items:center;padding:8px 10px;border:1px solid #1A2C1E;border-radius:6px;margin-bottom:3px;background:#0D1C12}
 .compacthome{display:flex;flex-direction:column;gap:1px;align-items:flex-end;min-width:0;overflow:hidden}
 .compactaway{display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden}
-.compactteam{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;color:#F0EDE2}
-.compactowner{font-size:9.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;color:#5A7A68}
-.compactscore{font-family:'Saira Condensed';font-weight:800;font-size:20px;color:#E8B33B;text-align:center;white-space:nowrap}
+.compactteam{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;color:#E8EDE6}
+.compactowner{font-size:9px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.compactscore{font-weight:800;font-size:18px;color:#E8B33B;text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums}
 
 /* ── Tab bar ── */
-.tabbar{position:fixed;bottom:0;left:0;right:0;display:flex;background:#09160EF8;border-top:1px solid #1E3528;backdrop-filter:blur(12px)}
-.tabbar button{flex:1;background:transparent;border:0;color:#4A6A56;padding:8px 0 12px;cursor:pointer;transition:color .15s;display:flex;flex-direction:column;align-items:center;gap:2px}
-.tabbar button.on{color:#E8B33B;box-shadow:inset 0 3px 0 #E8B33B}
-.tabicon{font-size:18px;line-height:1}
-.tablabel{font-family:'Saira Condensed';font-weight:700;letter-spacing:.08em;font-size:9px;text-transform:uppercase}
+.tabbar{position:fixed;bottom:0;left:0;right:0;display:flex;background:#0A150EFC;border-top:1px solid #1A2C1E;backdrop-filter:blur(16px)}
+.tabbar button{flex:1;background:transparent;border:0;color:#3A5A48;font-size:10px;font-weight:600;letter-spacing:.02em;padding:9px 0 11px;cursor:pointer;transition:color .12s;text-transform:uppercase}
+.tabbar button.on{color:#E8B33B;box-shadow:inset 0 2px 0 #E8B33B}
 
 /* ── League table ── */
-.leaguebox{padding:0;background:#0F2019;border:1px solid #1E3528;border-radius:12px;margin-bottom:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.3)}
-.leaguegrow{display:grid;grid-template-columns:24px minmax(86px,1.2fr) 30px 26px 26px 26px 36px 42px 38px 42px!important;gap:7px;align-items:center;border-left:4px solid transparent;border-bottom:1px solid #0D1E14;padding:9px 10px;font-size:12px;color:#F0EDE2;width:100%;text-align:left}
-.leaguegrow.leaguehead{background:#0C1A10;color:#4A6A56;text-transform:uppercase;font-size:9px;letter-spacing:.1em;border-left-color:transparent;padding:7px 10px}
-.leaguename{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.leaguerow{cursor:pointer;transition:background .1s}
-.leaguerow.lead{background:linear-gradient(90deg,#E8B33B14,transparent 70%)}
-.leaguesquad{border-left:4px solid #0D1E14}
-.squad{background:#091611;border-bottom:1px solid #0D1E14;padding:3px 0}
-.squadrow{display:flex;justify-content:space-between;padding:5px 13px;font-size:11px;color:#6B8A78}
+.leaguebox{padding:0;background:#0D1C12;border:1px solid #1A2C1E;border-radius:10px;margin-bottom:0;overflow:hidden}
+.leaguegrow{display:grid;grid-template-columns:22px minmax(82px,1.2fr) 28px 24px 24px 24px 34px 38px 36px 40px!important;gap:5px;align-items:center;border-left:3px solid transparent;border-bottom:1px solid #0E1810;padding:8px 10px;font-size:12px;color:#E8EDE6;width:100%;text-align:left}
+.leaguegrow.leaguehead{background:#0B1610;color:#3A5A48;text-transform:uppercase;font-size:9px;letter-spacing:.08em;border-left-color:transparent;padding:6px 10px}
+.leaguename{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.leaguerow{cursor:pointer}
+.leaguerow.lead{background:linear-gradient(90deg,#E8B33B10,transparent 60%)}
+.leaguesquad{border-left:3px solid #0E1810}
+.squad{background:#0A1410;border-bottom:1px solid #0E1810;padding:2px 0}
+.squadrow{display:flex;justify-content:space-between;padding:5px 12px;font-size:11px;color:#5A7A68}
 .exppts{color:#3A5A48;font-weight:600}
 
 /* ── Groups and tournament ── */
-.groupsview{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:8px}
-.glabel{font-family:'Saira Condensed';font-weight:800;letter-spacing:.2em;font-size:10px;color:#E8B33B;margin-bottom:0;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid #1A2E20}
-.grow{display:grid;grid-template-columns:1.15fr .8fr 28px 34px 34px 58px;gap:8px;align-items:center;border-left:4px solid transparent;border-bottom:1px solid #0D1E14;padding:7px 8px;font-size:12px;color:#F0EDE2}
+.groupsview{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px}
+.glabel{font-weight:700;letter-spacing:.1em;font-size:10px;color:#E8B33B;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid #162212}
+.grow{display:grid;grid-template-columns:1.15fr .8fr 28px 34px 34px 58px;gap:6px;align-items:center;border-left:3px solid transparent;border-bottom:1px solid #0E1810;padding:7px 8px;font-size:12px;color:#E8EDE6}
 .grow:last-child{border-bottom:0}
 .grow span{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.grow.ghead{color:#4A6A56;text-transform:uppercase;font-size:9px;background:#0C1A10;border-left-color:transparent;letter-spacing:.08em}
+.grow.ghead{color:#3A5A48;text-transform:uppercase;font-size:9px;background:#0B1610;border-left-color:transparent;letter-spacing:.08em}
 .grow.qualrow,.grow.ghead{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}
-.qualpill{font-size:9.5px;border-radius:999px;padding:2px 7px;text-align:center;background:#1E3528;color:#4A6A56;font-weight:700}
+.qualpill{font-size:9px;border-radius:4px;padding:2px 6px;text-align:center;background:#1A2C1E;color:#3A5A48;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .qualpill.alive{background:#142B1A;color:#2FB865}
-.qualpill.out{background:#2A1210;color:#C04840}
-.out{opacity:0.32;filter:grayscale(0.4)}
+.qualpill.out{background:#2A1210;color:#B04040}
+.out{opacity:0.3;filter:grayscale(0.4)}
 
 /* ── Chart sections ── */
-.chartbox{margin-top:12px}
-.charthead{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #1A2E20}
-.racechart{width:100%;height:auto;display:block;background:#091611;border:1px solid #1A2E20;border-radius:8px}
-.gridline{stroke:#1A2E20;stroke-width:1}
-.axisline{stroke:#1E3528;stroke-width:1}
-.axistext{fill:#3A5A48;font-size:11px;font-family:Inter,system-ui,sans-serif}
-.axislabel{fill:#3A5A48;font-size:10px;font-family:Inter,system-ui,sans-serif;letter-spacing:.04em}
-.chartlegend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;font-size:11px}
+.charthead{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #162212}
+.racechart{width:100%;height:auto;display:block;background:#0A1410;border:1px solid #162212;border-radius:6px}
+.gridline{stroke:#162212;stroke-width:1}
+.axisline{stroke:#1A2C1E;stroke-width:1}
+.axistext{fill:#2A4A38;font-size:11px;font-family:Inter,system-ui,sans-serif}
+.axislabel{fill:#2A4A38;font-size:10px;font-family:Inter,system-ui,sans-serif;letter-spacing:.04em}
+.chartlegend{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;font-size:11px}
 
-/* ── Dots ── */
-.dotsgrid{display:flex;flex-direction:column;gap:6px}
-.dotrow{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center}
-.dotlabel{font-size:12px;font-weight:700;color:#F0EDE2;min-width:80px}
-.dotsline{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
-.outcomedot{width:9px;height:9px;border-radius:50%;display:inline-block;background:#1E3528}
-.outcomedot.w{background:#2DB860}
-.outcomedot.d{background:#D4941A}
-.outcomedot.l{background:#C84040}
-.outcomedot.future{background:#1E3528}
-.managerdotrow{border:1px solid #1E3528;border-radius:9px;padding:7px 10px;grid-template-columns:minmax(70px,.42fr) 1fr}
-.managerdotrow .dotlabel{font-weight:900;color:#F0EDE2}
+/* ── Result Bars ── */
+.barslist{display:flex;flex-direction:column;gap:5px}
+.barsrow{display:grid;grid-template-columns:72px 1fr;gap:8px;align-items:center}
+.barslabel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.barstrack{display:flex;border-radius:4px;overflow:hidden;height:24px}
+.barsseg{display:flex;align-items:center;justify-content:center;min-width:0;overflow:hidden}
+.barsseg b{font-size:10px;font-weight:700;color:#fff;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,0.4)}
+.barsseg.w{background:#1E5C30}
+.barsseg.d{background:#5A4010}
+.barsseg.l{background:#5C1E1E}
+.barsseg.future{background:#162212}
 
 /* ── Draft cards ── */
-.lockcard.draftmanagercard{border-radius:10px;border:1px solid #1E3528;padding:11px 12px}
-.lockname{font-family:'Saira Condensed';font-size:18px;font-weight:800;display:flex;align-items:center;color:#F0EDE2}
-.lockrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
-.lockteam{font-size:11px;background:#091611;border:1px solid #1A2E20;border-radius:999px;padding:4px 10px;display:inline-flex;align-items:center;gap:5px;color:#B0C8B8}
-.lockteam.editing{border-radius:8px;padding:5px 8px}
-.lockteam.out{opacity:0.32}
-.draftnameinput{background:#091611;border:1px solid #E8B33B44;border-radius:7px;color:#F0EDE2;padding:5px 8px;font-family:Inter,system-ui,sans-serif;font-size:14px;font-weight:700;min-width:120px}
-.ownerselect{background:#0F2019;border:1px solid #1E3528;color:#F0EDE2;border-radius:6px;padding:3px 5px;font-size:11px;max-width:100px}
+.lockcard.draftmanagercard{border-radius:8px;border:1px solid #1A2C1E;padding:10px 12px}
+.lockname{font-size:14px;font-weight:700;display:flex;align-items:center;color:#E8EDE6;letter-spacing:-.01em}
+.lockrow{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+.lockteam{font-size:11px;background:#080F0C;border:1px solid #162212;border-radius:5px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;color:#8AAA98}
+.lockteam.editing{padding:4px 7px}
+.lockteam.out{opacity:0.28}
+.draftnameinput{background:#080F0C;border:1px solid #E8B33B44;border-radius:6px;color:#E8EDE6;padding:5px 8px;font-family:Inter,system-ui,sans-serif;font-size:13px;font-weight:600;min-width:110px}
+.ownerselect{background:#0D1C12;border:1px solid #1A2C1E;color:#E8EDE6;border-radius:5px;padding:3px 5px;font-size:11px;max-width:96px}
 
 /* ── Ranking list ── */
-.rankinglist{display:grid;grid-template-columns:1fr;gap:4px}
-.rankingrow{display:grid;grid-template-columns:38px minmax(120px,1fr) 58px minmax(72px,.7fr);gap:8px;align-items:center;background:#0F2019;border:1px solid #1E3528;border-left:4px solid #1E3528;border-radius:9px;padding:7px 9px;font-size:12px;color:#F0EDE2}
-.rankingrow.rankinghead{border-left-color:transparent;background:transparent;color:#4A6A56;text-transform:uppercase;font-size:9px;letter-spacing:.1em;padding-top:2px;padding-bottom:2px}
-.ranknum{font-family:'Saira Condensed';font-weight:800;color:#E8B33B;font-size:15px}
-.rankteam{font-weight:700;color:#F0EDE2}
-.rankfifa{font-family:'Saira Condensed';font-weight:800;color:#C8D8CC;font-size:14px}
+.rankinglist{display:grid;grid-template-columns:1fr;gap:3px}
+.rankingrow{display:grid;grid-template-columns:38px minmax(120px,1fr) 58px minmax(72px,.7fr);gap:6px;align-items:center;background:#0D1C12;border:1px solid #1A2C1E;border-left:3px solid #1A2C1E;border-radius:7px;padding:6px 9px;font-size:12px;color:#E8EDE6}
+.rankingrow.rankinghead{border-left-color:transparent;background:transparent;color:#3A5A48;text-transform:uppercase;font-size:9px;letter-spacing:.08em;padding-top:2px;padding-bottom:2px}
+.ranknum{font-weight:800;color:#E8B33B;font-size:14px;font-variant-numeric:tabular-nums}
+.rankteam{font-weight:600;color:#E8EDE6}
+.rankfifa{font-weight:700;color:#8AAA98;font-size:12px;font-variant-numeric:tabular-nums}
 .rankowner{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.playerrow{border-left:4px solid transparent;border-radius:9px;color:#F0EDE2}
-.playerrowname{font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.playerrow{border-left:3px solid transparent;border-radius:7px;color:#E8EDE6}
+.playerrowname{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ── Stat cards ── */
-.mystatcards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0 12px}
-.mystatcard{border:1px solid #1E3528;border-radius:12px;padding:12px 10px;display:flex;flex-direction:column;gap:4px;background:#0F2019;box-shadow:0 2px 10px rgba(0,0,0,0.25)}
-.mystatcard span{font-size:9.5px;color:#4A6A56;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
-.mystatcard b{font-family:'Saira Condensed';font-size:28px;line-height:1;color:#E8B33B}
+.mystatcards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:8px 0 0}
+.mystatcard{border:1px solid #1A2C1E;border-radius:8px;padding:10px 10px;display:flex;flex-direction:column;gap:3px;background:#0D1C12}
+.mystatcard span{font-size:9px;color:#3A5A48;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.mystatcard b{font-size:24px;line-height:1.1;color:#E8B33B;font-weight:800;font-variant-numeric:tabular-nums}
 
 /* ── Trophy chances ── */
-.trophygrid{display:flex;flex-direction:column;gap:5px}
+.trophygrid{display:flex;flex-direction:column;gap:3px}
 .trophyrow{display:grid;grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px;gap:6px 8px;align-items:center;font-size:12px}
-.trophyrow.compact,.trophyrow.trophyhead{display:grid;grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px;gap:8px;align-items:center;padding:8px 9px;border:1px solid #1E3528;border-radius:9px;background:#0F2019;font-size:12px;color:#F0EDE2}
-.trophyrow.trophyhead{background:#0C1A10;color:#4A6A56;text-transform:uppercase;font-size:9px;letter-spacing:.1em}
-.trophyrow.compact b{font-family:'Saira Condensed';font-size:16px;color:#E8B33B;text-align:right}
-.trophybar{height:6px;background:#1A2E20;border-radius:999px;overflow:hidden;min-width:44px}
+.trophyrow.compact,.trophyrow.trophyhead{display:grid;grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px;gap:6px;align-items:center;padding:7px 9px;border:1px solid #1A2C1E;border-radius:6px;background:#0D1C12;font-size:12px;color:#E8EDE6}
+.trophyrow.trophyhead{background:#0B1610;color:#3A5A48;text-transform:uppercase;font-size:9px;letter-spacing:.08em}
+.trophyrow.compact b{font-size:14px;color:#E8B33B;text-align:right;font-weight:800;font-variant-numeric:tabular-nums}
+.trophybar{height:5px;background:#162212;border-radius:999px;overflow:hidden;min-width:40px}
 .trophybar i{display:block;height:100%;border-radius:999px}
-.trophyrow.compact.playerrow{grid-template-columns:minmax(76px,1fr) minmax(54px,.85fr) 42px;border:1px solid #1E3528;border-left:4px solid transparent}
+.trophyrow.compact.playerrow{grid-template-columns:minmax(76px,1fr) minmax(54px,.85fr) 42px;border:1px solid #1A2C1E;border-left:3px solid transparent}
 
 /* ── Heatmap ── */
-.heatmapgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:7px}
-.heatgroup{display:flex;flex-direction:column;gap:5px;background:#0F2019;border:1px solid #1E3528;border-radius:10px;overflow:hidden}
-.heatgroup b{font-family:'Saira Condensed';color:#E8B33B;letter-spacing:.1em;font-size:11px;padding:7px 8px;border-bottom:1px solid #1A2E20;display:block}
-.heatteam{border-bottom:1px solid #0D1E14;padding:5px 8px;display:flex;justify-content:space-between;gap:6px;font-size:11px;color:#B0C8B8}
-.heatteam:last-child{border-bottom:0}
-.heatteam.mutedheat{background:#091611;color:#3A5A48}
-.heatteam small{font-size:10px;color:#4A6A56}
+.heatmapgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px}
+.heatgroup{display:flex;flex-direction:column;background:#0D1C12;border:1px solid #1A2C1E;border-radius:8px;overflow:hidden}
+.heatgroup b{font-weight:700;color:#E8B33B;letter-spacing:.12em;font-size:10px;text-transform:uppercase;padding:6px 8px;border-bottom:1px solid #162212;display:block}
+.heatteam{border:1px solid #1A2C1E;border-radius:6px;margin:4px 6px;padding:5px 7px;display:flex;justify-content:space-between;gap:6px;font-size:11px;color:#8AAA98}
+.heatteam.mutedheat{background:transparent;border-color:#0E1810;color:#2A4A38}
+.heatteam small{font-size:10px;color:#3A5A48}
 
 /* ── Brackets ── */
-.bracketgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
-.bracketround{background:#091611;border:1px solid #1E3528;border-radius:10px;padding:9px;display:flex;flex-direction:column;gap:7px}
-.bracketround>b{font-family:'Saira Condensed';color:#E8B33B;text-transform:uppercase;letter-spacing:.12em;font-size:11px}
-.bracketmatch{background:#0F2019;border:1px solid #1E3528;border-radius:8px;padding:8px;font-size:11px;display:grid;grid-template-columns:1fr auto 1fr;gap:5px;align-items:center;color:#F0EDE2}
+.bracketgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:7px}
+.bracketround{background:#0A1410;border:1px solid #1A2C1E;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.bracketround>b{font-weight:700;color:#E8B33B;text-transform:uppercase;letter-spacing:.1em;font-size:10px}
+.bracketmatch{background:#0D1C12;border:1px solid #1A2C1E;border-radius:6px;padding:7px;font-size:11px;display:grid;grid-template-columns:1fr auto 1fr;gap:5px;align-items:center;color:#E8EDE6}
 .bracketmatch span:last-of-type{text-align:right}
-.bracketmatch strong{font-family:'Saira Condensed';font-size:18px;color:#E8B33B;text-align:center}
-.bracketmatch small{grid-column:1/-1;color:#4A6A56;font-size:9.5px}
+.bracketmatch strong{font-weight:800;font-size:16px;color:#E8B33B;text-align:center;font-variant-numeric:tabular-nums}
+.bracketmatch small{grid-column:1/-1;color:#3A5A48;font-size:9px}
 
-/* ── Opponents (flags only) ── */
-.opponentrow{grid-template-columns:minmax(105px,.75fr) minmax(170px,1fr)!important}
-.opponentchips{display:flex;flex-wrap:wrap;gap:4px}
-.oppchip{font-style:normal;border:0;border-radius:6px;padding:4px 6px;font-size:14px;background:#1A2E20;display:inline-flex;align-items:center;line-height:1}
-.oppchip.w{background:rgba(45,184,96,.2)}
-.oppchip.d{background:rgba(212,148,26,.2)}
-.oppchip.l{background:rgba(200,64,64,.2)}
-.oppchip.future{background:#141F17}
+/* ── Opponents section ── */
+.oppteams{display:flex;flex-direction:column;gap:5px}
+.oppteamrow{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #0E1810;min-width:0}
+.oppteamrow:last-child{border-bottom:0}
+.oppteamrow.out{opacity:.3}
+.oppteamlabel{display:flex;align-items:center;gap:5px;min-width:100px;flex-shrink:0}
+.oppflag{font-size:14px;line-height:1}
+.oppteamname{font-size:11px;font-weight:600;color:#8AAA98;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px}
+.opponentchips{display:flex;flex-wrap:wrap;gap:3px;flex:1}
+.oppchip{font-style:normal;border:0;border-radius:4px;padding:3px 5px;font-size:12px;background:#162212;display:inline-flex;align-items:center;gap:2px;line-height:1}
+.oppchip b{font-size:9px;font-weight:700;letter-spacing:.04em;font-style:normal}
+.oppchip.w{background:#183022}.oppchip.w b{color:#3AB860}
+.oppchip.d{background:#2A2010}.oppchip.d b{color:#C89030}
+.oppchip.l{background:#301818}.oppchip.l b{color:#C04040}
+.oppchip.future{background:#0E1810}
 
 /* ── Rivalries ── */
 .rivalstable .rivalryrow{grid-template-columns:minmax(94px,1fr) 56px 56px 48px!important}
-.rivalryrow b{font-family:'Saira Condensed';font-size:15px;color:#E8B33B}
+.rivalryrow b{font-size:14px;color:#E8B33B;font-weight:800;font-variant-numeric:tabular-nums}
 
 /* ── Country performance rows ── */
-.countryperfrow{grid-template-columns:minmax(90px,1.2fr) minmax(58px,.75fr) 32px 34px 38px 48px 48px 44px!important;gap:6px!important;padding:5px 7px!important;font-size:12px!important;color:#F0EDE2}
-.countryperfrow .plainowner{font-weight:700;color:#B0C8B8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.countryperfrow b:last-child{font-family:'Saira Condensed';font-size:15px;color:#E8B33B}
-.mysteamrow{grid-template-columns:minmax(94px,1.25fr) 38px 30px 34px 38px 48px 48px 44px!important;gap:6px!important;padding:6px 8px!important;font-size:12px!important;border-left:4px solid transparent;color:#F0EDE2}
-.mysteamrow b:last-child{font-family:'Saira Condensed';font-size:15px;color:#E8B33B}
-.mysteamtable .rankinghead,.countryperf .rankinghead{background:transparent!important;color:#4A6A56!important;text-transform:uppercase;font-size:9px!important;letter-spacing:.1em!important;border-left-color:transparent!important}
+.countryperfrow{grid-template-columns:minmax(90px,1.2fr) minmax(58px,.75fr) 32px 34px 38px 48px 48px 44px!important;gap:5px!important;padding:5px 7px!important;font-size:11px!important;color:#E8EDE6}
+.countryperfrow .plainowner{font-weight:600;color:#8AAA98;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.countryperfrow b:last-child{font-size:13px;color:#E8B33B;font-weight:800;font-variant-numeric:tabular-nums}
+.mysteamrow{grid-template-columns:minmax(110px,1.4fr) 32px 48px 48px 44px!important;gap:5px!important;padding:6px 8px!important;font-size:11px!important;border-left:3px solid transparent;color:#E8EDE6}
+.mysteamrow b{font-size:13px;color:#E8B33B;font-weight:800;font-variant-numeric:tabular-nums}
+.mysteamtable .rankinghead,.countryperf .rankinghead{background:transparent!important;color:#3A5A48!important;text-transform:uppercase;font-size:9px!important;letter-spacing:.08em!important;border-left-color:transparent!important}
 
 /* ── Filters ── */
-.filterrow{display:grid;gap:6px;margin-bottom:8px}
-.filterrow-status{grid-template-columns:repeat(4,1fr);border:1px solid #1E3528;border-radius:9px;overflow:hidden;background:#0F2019}
-.statusbtn{background:transparent;border:0;border-right:1px solid #1A2E20;color:#4A6A56;font-size:11px;padding:10px 4px;cursor:pointer;width:100%;text-align:center;font-weight:700;transition:all .12s}
+.filterrow{display:grid;gap:5px;margin-bottom:7px}
+.filterrow-status{grid-template-columns:repeat(4,1fr);border:1px solid #1A2C1E;border-radius:7px;overflow:hidden;background:#0D1C12}
+.statusbtn{background:transparent;border:0;border-right:1px solid #162212;color:#3A5A48;font-size:11px;padding:9px 4px;cursor:pointer;width:100%;text-align:center;font-weight:600}
 .statusbtn:last-child{border-right:0}
-.statusbtn.on{background:#E8B33B;color:#0A1812;font-weight:800}
-.filterpanel{background:#0F2019;border:1px solid #1E3528;border-radius:10px;padding:11px;margin:0 0 8px;display:grid;grid-template-columns:1fr;gap:7px;font-size:12px}
-.filterpanel label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#4A6A56;font-weight:700}
+.statusbtn.on{background:#E8B33B;color:#0A1812;font-weight:700}
+.filterpanel{background:#0D1C12;border:1px solid #1A2C1E;border-radius:8px;padding:10px;margin:0 0 7px;display:grid;grid-template-columns:1fr;gap:6px;font-size:12px}
+.filterpanel label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#3A5A48;font-weight:700}
 .filterpanel .filterselect{width:100%;min-width:0}
-.filterselect{background:#091611;border:1px solid #1E3528;color:#F0EDE2;border-radius:8px;padding:8px 10px;font-size:13px;min-width:160px}
-.filterselect.small{min-width:110px}
+.filterselect{background:#080F0C;border:1px solid #1A2C1E;color:#E8EDE6;border-radius:6px;padding:7px 9px;font-size:13px;min-width:140px}
+.filterselect.small{min-width:100px}
 
 /* ── Toggle ── */
-.togglelabel{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:#6B8A78;cursor:pointer;user-select:none;padding:4px 0}
-.toggleswitch{display:inline-block;width:38px;height:21px;background:#1E3528;border-radius:999px;position:relative;transition:background .2s;cursor:pointer;flex-shrink:0}
+.togglelabel{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#5A7A68;cursor:pointer;user-select:none;padding:3px 0}
+.toggleswitch{display:inline-block;width:36px;height:20px;background:#1A2C1E;border-radius:999px;position:relative;transition:background .2s;cursor:pointer;flex-shrink:0}
 .toggleswitch.on{background:#E8B33B}
-.toggleknob{position:absolute;top:3px;left:3px;width:15px;height:15px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 4px rgba(0,0,0,0.4)}
-.toggleswitch.on .toggleknob{transform:translateX(17px)}
+.toggleknob{position:absolute;top:3px;left:3px;width:14px;height:14px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
+.toggleswitch.on .toggleknob{transform:translateX(16px)}
 
 /* ── Modal ── */
-.modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:9999;padding:18px}
-.modalCard{width:340px;max-width:100%;background:#0F2019;border:1px solid #E8B33B33;border-radius:16px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,0.75)}
-.modalCard h3{font-family:'Saira Condensed';font-size:22px;font-weight:800;text-transform:uppercase;color:#E8B33B;margin:0 0 7px;letter-spacing:.06em}
-.modalText{font-size:13px;color:#A0B8A8;margin:0 0 12px;line-height:1.4}
-.modalCard input{width:100%;background:#091611;border:1px solid #1E3528;border-radius:8px;color:#F0EDE2;padding:11px;font-size:14px}
+.modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:9999;padding:18px}
+.modalCard{width:320px;max-width:100%;background:#0D1C12;border:1px solid #1A2C1E;border-radius:12px;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,0.8)}
+.modalCard h3{font-size:18px;font-weight:800;text-transform:uppercase;color:#E8B33B;margin:0 0 6px;letter-spacing:.04em}
+.modalText{font-size:12px;color:#6A8A78;margin:0 0 12px;line-height:1.4}
+.modalCard input{width:100%;background:#080F0C;border:1px solid #1A2C1E;border-radius:6px;color:#E8EDE6;padding:10px;font-size:14px;font-family:Inter,sans-serif}
 .modalCard input:focus{outline:2px solid #E8B33B;border-color:transparent}
-.modalError{color:#E0635C;font-size:12px;margin-top:7px}
-.modalButtons{display:flex;gap:7px;margin-top:12px}
-.modalButtons button{flex:1;border:0;border-radius:9px;padding:10px 12px;font-weight:800;cursor:pointer;font-size:14px}
+.modalError{color:#C04040;font-size:12px;margin-top:6px}
+.modalButtons{display:flex;gap:6px;margin-top:12px}
+.modalButtons button{flex:1;border:0;border-radius:7px;padding:10px;font-weight:700;cursor:pointer;font-size:13px}
 .modalUnlock{background:#E8B33B;color:#0A1812}
-.modalCancel{background:#1E3528;color:#A0B8A8;border:1px solid #2A3A28!important}
+.modalCancel{background:#162212;color:#8AAA98;border:1px solid #1A2C1E!important}
 
 /* ── Swap log ── */
-.swaplog{margin-top:20px;padding-top:16px;border-top:1px solid #1A2E20}
-.swaplog-hd{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#4A6A56;margin-bottom:8px}
-.swaprow{display:flex;align-items:center;gap:7px;padding:8px 11px;background:#091611;border:1px solid #1A2E20;border-radius:9px;margin-bottom:5px;min-width:0}
-.swapdate{font-size:10px;font-weight:700;color:#4A6A56;flex-shrink:0}
-.swaptext{font-size:11px;color:#B0C8B8;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.swapnet{font-size:11px;font-weight:800;flex-shrink:0;white-space:nowrap;padding:2px 8px;border-radius:6px}
-.swapnet.pos{color:#2DB860;background:rgba(45,184,96,.15)}
-.swapnet.zero{color:#4A6A56;background:#1A2E20}
+.swaplog{margin-top:24px;padding-top:14px;border-top:1px solid #162212}
+.swaplog-hd{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:#3A5A48;margin-bottom:7px}
+.swaprow{display:flex;align-items:center;gap:6px;padding:7px 10px;background:#0A1410;border:1px solid #162212;border-radius:6px;margin-bottom:3px;min-width:0}
+.swapdate{font-size:9.5px;font-weight:700;color:#3A5A48;flex-shrink:0;font-variant-numeric:tabular-nums}
+.swaptext{font-size:11px;color:#8AAA98;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.swapnet{font-size:10px;font-weight:700;flex-shrink:0;white-space:nowrap;padding:2px 7px;border-radius:4px;font-variant-numeric:tabular-nums}
+.swapnet.pos{color:#2DB860;background:#162C1A}
+.swapnet.zero{color:#3A5A48;background:#162212}
 
 /* ── Good/bad text ── */
 .goodtext{color:#2DB860!important;font-weight:700}
-.badtext{color:#C84040!important;font-weight:700}
+.badtext{color:#B84040!important;font-weight:700}
 
 /* ── Channel logo ── */
-.channelpill{border:1px solid #1E3528;background:#112218;color:#8BA898;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center}
-.channellogo{height:12px;width:auto;display:block}
+.channelpill{border:1px solid #1A2C1E;background:#0D1C12;color:#6A8A78;border-radius:4px;padding:2px 6px;font-size:9.5px;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;text-transform:uppercase;letter-spacing:.04em}
+.channellogo{height:11px;width:auto;display:block}
 
 /* ── Misc ── */
-.tableintro{margin:-4px 0 8px;color:#4A6A56;font-size:11px}
-.empty{text-align:center;color:#4A6A56;padding:20px;font-size:13px}
-.empty.small{padding:8px}
-.draftsavemsg{font-size:10px;color:#4A6A56;min-height:14px}
-.pdot.solo{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;flex:0 0 auto}
-.mystatsrow{border-left-width:4px!important}
-.rivalstable .rivalryrow.playerrow{border-left-width:4px!important}
+.tableintro{margin:-3px 0 8px;color:#3A5A48;font-size:11px}
+.empty{text-align:center;color:#3A5A48;padding:20px;font-size:12px}
+.empty.small{padding:6px}
+.draftsavemsg{font-size:10px;color:#3A5A48;min-height:14px}
+.pdot.solo{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;flex:0 0 auto}
+.mystatsrow{border-left-width:3px!important}
+.rivalstable .rivalryrow.playerrow{border-left-width:3px!important}
 .rankinglist.compact>.rankingrow:not(.countryperfrow):not(.mysteamrow):not(.opponentrow){grid-template-columns:34px minmax(104px,1.25fr) 44px 50px minmax(70px,.8fr)}
 
 /* ── Mobile ── */
 @media(max-width:560px){
-  .pane{padding:9px 10px}
-  .hero{padding:10px 12px 0}
-  h1{font-size:24px}
-  h1 span{font-size:18px}
-  .match,.lockcard,.chartbox,.board{padding:9px 10px;margin-bottom:5px}
-  .mname{font-size:11px}
-  .mscore{font-size:18px;min-width:38px}
+  .pane{padding:8px 10px}
+  .hero{padding:9px 12px 0}
+  h1{font-size:18px}
+  h1 span{font-size:14px}
+  .match{padding:8px 9px}
+  .lockcard,.chartbox,.board{padding:9px 10px}
+  .ml-name{font-size:11px}
+  .ml-score{font-size:14px;min-width:36px}
+  .ml-managers{max-width:70px}
+  .ml-mgr{max-width:30px}
   .groupsview{grid-template-columns:1fr}
-  .mystatcards{gap:6px}
-  .mystatcard{padding:10px 8px}
-  .mystatcard b{font-size:24px}
-  .mystatcard span{font-size:9px}
-  .tabbar button{padding:7px 0 10px}
-  .tabicon{font-size:16px}
-  .tablabel{font-size:8px}
-  .leaguegrow{grid-template-columns:20px minmax(70px,1.05fr) 23px 20px 20px 20px 28px 31px 30px 32px!important;gap:3px!important;padding:7px 5px!important;font-size:9.8px!important}
+  .mystatcards{gap:5px}
+  .mystatcard{padding:9px 8px}
+  .mystatcard b{font-size:20px}
+  .mystatcard span{font-size:8.5px}
+  .tabbar button{padding:8px 0 10px;font-size:9px}
+  .leaguegrow{grid-template-columns:20px minmax(70px,1.05fr) 22px 20px 20px 20px 26px 30px 28px 30px!important;gap:3px!important;padding:6px 5px!important;font-size:9.5px!important}
   .leaguegrow.leaguehead{font-size:7.5px!important}
-  .countryperfrow{grid-template-columns:minmax(98px,1.3fr) minmax(52px,.65fr) 28px 31px 46px!important;gap:4px!important;padding:4px 5px!important;font-size:10px!important}
-  .mysteamrow{grid-template-columns:minmax(94px,1.3fr) 36px 26px 31px 46px!important;gap:4px!important;padding:5px 5px!important;font-size:10px!important}
-  .compactmatch{padding:6px 8px;gap:3px 5px;grid-template-columns:30px 1fr 38px 1fr}
+  .countryperfrow{grid-template-columns:minmax(90px,1.3fr) minmax(48px,.6fr) 26px 28px 42px!important;gap:4px!important;padding:4px 5px!important;font-size:10px!important}
+  .mysteamrow{grid-template-columns:minmax(100px,1.4fr) 28px 44px 44px 40px!important;gap:4px!important;padding:5px!important;font-size:10px!important}
+  .compactmatch{padding:6px 8px;gap:3px 5px;grid-template-columns:30px 1fr 36px 1fr}
   .compactteam{font-size:10px}
-  .compactscore{font-size:17px}
-  .dotrow{grid-template-columns:1fr}
-  .managerdotrow{grid-template-columns:1fr;padding:6px 8px}
-  .rivalstable .rivalryrow{grid-template-columns:minmax(80px,1fr) 46px 46px 38px!important;font-size:10px}
-  .opponentrow{grid-template-columns:1fr!important}
-  .opponentchips{margin-top:5px}
-  .grow,.grow.qualrow,.grow.ghead{grid-template-columns:1.05fr .72fr 24px 28px 28px 48px;font-size:10px}
+  .compactscore{font-size:16px}
+  .barsrow{grid-template-columns:60px 1fr;gap:6px}
+  .barstrack{height:20px}
+  .barsseg b{font-size:9px}
+  .rivalstable .rivalryrow{grid-template-columns:minmax(78px,1fr) 44px 44px 36px!important;font-size:10px}
+  .oppteamlabel{min-width:80px}
+  .oppteamname{max-width:60px}
+  .grow,.grow.qualrow,.grow.ghead{grid-template-columns:1.05fr .72fr 24px 28px 28px 46px;font-size:10px}
   .filterpanel{gap:5px;padding:9px}
-  .rankinglist.compact>.rankingrow:not(.countryperfrow):not(.mysteamrow):not(.opponentrow){grid-template-columns:28px minmax(88px,1.1fr) 36px 42px minmax(54px,.7fr);font-size:9.5px!important}
-  .rankowner .managerpill{font-size:8px!important;padding:1px 4px!important}
-  .oppchip{font-size:13px!important;padding:3px 5px!important}
-  .trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(82px,1fr) minmax(54px,.8fr) 38px;gap:5px;padding:7px}
-  .trophyrow.compact b{font-size:14px}
-  .trophyrow.compact.playerrow{grid-template-columns:minmax(70px,1fr) minmax(42px,.75fr) 36px;gap:5px;padding:5px;font-size:10px}
-  .trophyrow.compact.playerrow b{font-size:13px}
+  .rankinglist.compact>.rankingrow:not(.countryperfrow):not(.mysteamrow){grid-template-columns:28px minmax(88px,1.1fr) 36px 42px minmax(54px,.7fr);font-size:9.5px!important}
+  .rankowner .managerpill{font-size:7.5px!important;padding:1px 4px!important}
+  .trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(80px,1fr) minmax(50px,.8fr) 36px;gap:4px;padding:6px}
+  .trophyrow.compact b{font-size:13px}
+  .trophyrow.compact.playerrow{grid-template-columns:minmax(68px,1fr) minmax(40px,.75fr) 34px;gap:4px;padding:5px;font-size:10px}
+  .trophyrow.compact.playerrow b{font-size:12px}
   .playerrowname{font-size:10px}
   .countryperf .countryperfrow>*:nth-child(5),.countryperf .countryperfrow>*:nth-child(6){display:none!important}
-  .countryperf .countryperfrow{grid-template-columns:minmax(88px,1.35fr) minmax(48px,.7fr) 26px 28px 44px 38px!important}
-  .mxpts{display:none}
+  .countryperf .countryperfrow{grid-template-columns:minmax(88px,1.35fr) minmax(46px,.65fr) 24px 28px 42px 36px!important}
 }
 `;
