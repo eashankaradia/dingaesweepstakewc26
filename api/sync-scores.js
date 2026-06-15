@@ -4,6 +4,46 @@ let nextRefreshAt = 0;
 
 const CACHE_MS = 5 * 60 * 1000;
 
+const OWNER = "eashankaradia";
+const REPO = "dingaesweepstakewc26";
+const BRANCH = "main";
+const CACHE_FILE = "public/matches-cache.json";
+
+async function writeMatchesCache(matches, meta, nextRefreshAtMs) {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return;
+  try {
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "User-Agent": "dingae-sweepstake",
+      Accept: "application/vnd.github+json",
+    };
+    const metaRes = await fetch(
+      `https://api.github.com/repos/${OWNER}/${REPO}/contents/${CACHE_FILE}?ref=${BRANCH}`,
+      { headers }
+    );
+    const sha = metaRes.ok ? (await metaRes.json()).sha : undefined;
+    const body = {
+      message: "Update matches cache",
+      content: Buffer.from(JSON.stringify({
+        matches,
+        meta,
+        cachedAt: new Date().toISOString(),
+        nextRefreshAt: new Date(nextRefreshAtMs).toISOString(),
+      }, null, 2) + "\n").toString("base64"),
+      branch: BRANCH,
+    };
+    if (sha) body.sha = sha;
+    await fetch(
+      `https://api.github.com/repos/${OWNER}/${REPO}/contents/${CACHE_FILE}`,
+      { method: "PUT", headers, body: JSON.stringify(body) }
+    );
+  } catch {
+    // non-blocking
+  }
+}
+
 const TEAM_ALIASES = {
   Mexico: "MEX",
   "South Africa": "RSA",
@@ -454,6 +494,8 @@ if (
 cachedResponse = response;
 cachedAt = now;
 nextRefreshAt = now + CACHE_MS;
+
+    writeMatchesCache(matches, response.meta, nextRefreshAt).catch(() => {});
 
     return res.status(200).json(response);
   } catch (err) {
