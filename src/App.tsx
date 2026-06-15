@@ -1938,9 +1938,19 @@ export default function App() {
       <header className="hero">
         <div className="herofoot">
           <div className="eyebrow">WORLD CUP ‘26</div>
-          <button className="syncbtn herorefresh" onClick={runSync} disabled={!canRefresh}>
-            {refreshButtonText}
-          </button>
+          <div className="herosync">
+            <span className="syncmsg">
+              {syncMsg ||
+                (!canRefresh
+                  ? `Next refresh in ${refreshMinutesLeft}m`
+                  : state.lastSync
+                  ? "Last check " + fmtDateTime(state.lastSync)
+                  : "")}
+            </span>
+            <button className="syncbtn herorefresh" onClick={runSync} disabled={!canRefresh}>
+              {refreshButtonText}
+            </button>
+          </div>
         </div>
         <h1>
           DINGAE
@@ -2043,15 +2053,7 @@ export default function App() {
             <div className="subtle">{filteredMatches.length} shown</div>
           </div>
           <div className="syncbar">
-            <span className="syncmsg" style={{ flex: 1 }}>
-              {syncMsg ||
-                (!canRefresh
-                  ? `Next refresh in ${refreshMinutesLeft}m`
-                  : state.lastSync
-                  ? "Last check " + fmtDateTime(state.lastSync)
-                  : "Tap update to fetch scores")}
-            </span>
-            <label className="togglelabel">
+            <label className="togglelabel" style={{ marginLeft: "auto" }}>
               <span>Compact</span>
               <span className={`toggleswitch ${compactResults ? "on" : ""}`} onClick={() => setCompactResults((v) => !v)} role="switch" aria-checked={compactResults}>
                 <span className="toggleknob" />
@@ -2355,6 +2357,8 @@ const CSS = `
 
 .draftsavemsg{font-size:11px;color:#8BA898;min-height:16px}
 .herofoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px}
+.herosync{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.herosync .syncmsg{font-size:11px;color:#9FBFA8;white-space:nowrap}
 .herorefresh{font-size:11px;padding:6px 12px;flex-shrink:0}
 .swaplog{margin-top:28px;padding-top:20px;border-top:1px solid #ffffff14}
 .swaplog-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#8BA898;margin-bottom:10px}
