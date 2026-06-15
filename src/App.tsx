@@ -1231,11 +1231,9 @@ export default function App() {
             <span className="city">{fmtDateTime(m.date)}</span>
           )}
           {channel && (
-            <span className="channelpill">
-              {channelLogoSrc(channel)
-                ? <img src={channelLogoSrc(channel)} alt={fmtChannel(channel)} className="channellogo" />
-                : fmtChannel(channel)}
-            </span>
+            channelLogoSrc(channel)
+              ? <img src={channelLogoSrc(channel)} alt={fmtChannel(channel)} className="channellogo" />
+              : <span className="channelpill">{fmtChannel(channel)}</span>
           )}
         </div>
         <div className="scoreline">
