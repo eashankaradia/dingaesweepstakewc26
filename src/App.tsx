@@ -1937,7 +1937,7 @@ export default function App() {
       <style>{CSS}</style>
       <header className="hero">
         <div className="herofoot">
-          <div className="eyebrow">WORLD CUP ‘26</div>
+          <div style={{ flex: 1 }} />
           <div className="herosync">
             <span className="syncmsg">
               {syncMsg ||
