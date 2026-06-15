@@ -2052,25 +2052,23 @@ export default function App() {
             <h2>Fixtures & Results</h2>
             <div className="subtle">{filteredMatches.length} shown</div>
           </div>
-          <div className="syncbar">
-            <label className="togglelabel" style={{ marginLeft: "auto" }}>
-              <span>Compact</span>
-              <span className={`toggleswitch ${compactResults ? "on" : ""}`} onClick={() => setCompactResults((v) => !v)} role="switch" aria-checked={compactResults}>
-                <span className="toggleknob" />
-              </span>
-            </label>
-          </div>
           {(() => {
             const hasActive = resultFilter !== "all" || resultGroupFilter !== "all" || resultDateFilter || resultCountryFilter !== "all" || resultStatusFilter !== "all";
             const clearAll = () => { setResultFilter("all"); setResultGroupFilter("all"); setResultDateFilter(""); setResultCountryFilter("all"); setResultStatusFilter("all"); };
             const today = localDateKey(new Date());
             return (
               <>
-                <div className="filterrow" style={{ gridTemplateColumns: hasActive ? "1fr 1fr" : "1fr" }}>
+                <div className="filterrow" style={{ gridTemplateColumns: hasActive ? "1fr 1fr auto" : "1fr auto" }}>
                   <button className="clearfilterbtn" onClick={() => setFiltersOpen(!filtersOpen)}>
                     {filtersOpen ? "Hide filters" : "Show filters"}
                   </button>
                   {hasActive && <button className="clearfilterbtn" onClick={clearAll}>Clear filters</button>}
+                  <label className="togglelabel">
+                    <span>Compact</span>
+                    <span className={`toggleswitch ${compactResults ? "on" : ""}`} onClick={() => setCompactResults((v) => !v)} role="switch" aria-checked={compactResults}>
+                      <span className="toggleknob" />
+                    </span>
+                  </label>
                 </div>
                 <div className="filterrow filterrow-status">
                   <button className={`statusbtn ${resultDateFilter === today ? "on" : ""}`} onClick={() => setResultDateFilter(resultDateFilter === today ? "" : today)}>Today</button>
