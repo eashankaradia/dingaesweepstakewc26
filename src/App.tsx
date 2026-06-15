@@ -557,6 +557,25 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  // Load shared matches cache from GitHub so everyone sees the same data
+  useEffect(() => {
+    const RAW = "https://raw.githubusercontent.com/eashankaradia/dingaesweepstakewc26/main/public/matches-cache.json";
+    fetch(`${RAW}?t=${Date.now()}`, { headers: { "Cache-Control": "no-cache" } })
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data.matches) && data.matches.length > 0) {
+          setState((s) => ({
+            ...s,
+            apiMatches: data.matches,
+            apiMeta: data.meta || null,
+            lastSync: data.cachedAt ? new Date(data.cachedAt).getTime() : s.lastSync,
+            nextRefreshAt: data.nextRefreshAt ? new Date(data.nextRefreshAt).getTime() : s.nextRefreshAt,
+          }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(STORE_KEY, JSON.stringify(state));
   }, [state]);
