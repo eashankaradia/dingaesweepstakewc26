@@ -2015,23 +2015,15 @@ export default function App() {
                   {swap.parties.map((party, i) => {
                     const opponent = swap.parties[1 - i];
                     const gavePts = teamPtsSince(party.gave, swap.date, state.apiMatches);
-                    const recPts = teamPtsSince(party.received, swap.date, state.apiMatches);
-                    const net = recPts - gavePts;
                     const color = PLAYER_COLORS[party.pid];
                     return (
                       <div key={party.player} className="swaprow" style={{ borderLeftColor: color }}>
                         <span className="swapname" style={{ color }}>{party.player}</span>
-                        <span className="swapgave">
-                          gave {TEAMS[party.gave]?.[1]} {TEAMS[party.gave]?.[0]}
-                          <span className="swappointtag">{gavePts}pts → {opponent.player}</span>
+                        <span className="swaptext">
+                          swapped {TEAMS[party.gave]?.[1]} to {opponent.player} for {TEAMS[party.received]?.[1]}
                         </span>
-                        <span className="swaparr">→</span>
-                        <span className="swaprecd">
-                          got {TEAMS[party.received]?.[1]} {TEAMS[party.received]?.[0]}
-                          <span className="swappointtag">{recPts}pts</span>
-                        </span>
-                        <span className={`swapnet ${net > 0 ? "pos" : net < 0 ? "neg" : "zero"}`}>
-                          {net > 0 ? "+" : ""}{net} pts
+                        <span className={`swapnet ${gavePts > 0 ? "neg" : gavePts === 0 ? "zero" : "pos"}`}>
+                          {opponent.player} {gavePts > 0 ? "+" : ""}{gavePts}
                         </span>
                       </div>
                     );
@@ -2368,13 +2360,11 @@ const CSS = `
 .swaplog-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#8BA898;margin-bottom:14px}
 .swapcard{background:#0E2318;border:1px solid #ffffff10;border-radius:10px;padding:13px 14px;margin-bottom:10px}
 .swapcard-date{font-size:11px;color:#8BA898;font-weight:700;letter-spacing:.05em;margin-bottom:10px}
-.swaprow{display:flex;align-items:center;gap:6px;padding:7px 10px;border-left:3px solid #fff3;border-radius:0 6px 6px 0;background:#00000020;margin-bottom:6px;flex-wrap:wrap;row-gap:4px}
+.swaprow{display:flex;align-items:center;gap:8px;padding:7px 10px;border-left:3px solid #fff3;border-radius:0 6px 6px 0;background:#00000020;margin-bottom:6px;flex-wrap:wrap;row-gap:3px}
 .swaprow:last-child{margin-bottom:0}
-.swapname{font-size:12px;font-weight:800;min-width:52px;flex-shrink:0}
-.swapgave,.swaprecd{font-size:12px;color:#C8D8CC;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-.swaparr{color:#8BA898;font-size:13px;flex-shrink:0}
-.swappointtag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:#ffffff10;color:#C8D8CC;white-space:nowrap}
-.swapnet{font-size:13px;font-weight:900;margin-left:auto;flex-shrink:0;white-space:nowrap;padding:3px 8px;border-radius:6px}
+.swapname{font-size:12px;font-weight:800;flex-shrink:0}
+.swaptext{font-size:12px;color:#C8D8CC;flex:1}
+.swapnet{font-size:12px;font-weight:900;flex-shrink:0;white-space:nowrap;padding:3px 8px;border-radius:6px}
 .swapnet.pos{color:#6BC17A;background:#6BC17A18}
 .swapnet.neg{color:#FF6B6B;background:#FF6B6B18}
 .swapnet.zero{color:#8BA898;background:#ffffff08}
