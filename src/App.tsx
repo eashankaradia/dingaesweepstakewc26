@@ -2019,7 +2019,9 @@ export default function App() {
                   <span className="swapdate">{fmtDate}</span>
                   <span className="swaptext">
                     <span style={{ color: PLAYER_COLORS[p1.pid], fontWeight: 800 }}>{p1.player}</span>
-                    {" swapped "}{TEAMS[p1.gave]?.[1]}{" with "}{p2.player}{" for "}{TEAMS[p1.received]?.[1]}
+                    {" swapped "}{TEAMS[p1.gave]?.[1]}{" with "}
+                    <span style={{ color: PLAYER_COLORS[p2.pid], fontWeight: 800 }}>{p2.player}</span>
+                    {" for "}{TEAMS[p1.received]?.[1]}
                   </span>
                   {winner
                     ? <span className="swapnet pos">{winner.player} +{absNet}</span>
