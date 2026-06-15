@@ -2006,29 +2006,25 @@ export default function App() {
           <div className="swaplog">
             <div className="swaplog-hd">Trade History</div>
             {SWAP_LOG.map((swap) => {
-              const fmtDate = new Date(swap.date).toLocaleDateString("en-GB", {
-                day: "numeric", month: "short", year: "numeric",
-              });
+              const [p1, p2] = swap.parties;
+              const p1Pts = teamPtsSince(p1.gave, swap.date, state.apiMatches);
+              const p2Pts = teamPtsSince(p2.gave, swap.date, state.apiMatches);
+              const diff = p1Pts - p2Pts;
+              const winner = diff > 0 ? p2 : diff < 0 ? p1 : null;
+              const absNet = Math.abs(diff);
+              const d = new Date(swap.date);
+              const fmtDate = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}`;
               return (
-                <div key={swap.id} className="swapcard">
-                  <div className="swapcard-date">{fmtDate}</div>
-                  {(() => {
-                    const [p1, p2] = swap.parties;
-                    const p1Pts = teamPtsSince(p1.gave, swap.date, state.apiMatches);
-                    const p2Pts = teamPtsSince(p2.gave, swap.date, state.apiMatches);
-                    const net = Math.abs(p1Pts - p2Pts);
-                    return (
-                      <div className="swaprow" style={{ borderLeftColor: PLAYER_COLORS[p1.pid] }}>
-                        <span className="swapname" style={{ color: PLAYER_COLORS[p1.pid] }}>{p1.player}</span>
-                        <span className="swaptext">
-                          swapped {TEAMS[p1.gave]?.[1]} to {p2.player} for {TEAMS[p1.received]?.[1]}
-                        </span>
-                        <span className={`swapnet ${net > 0 ? "pos" : "zero"}`}>
-                          {net > 0 ? "+" : ""}{net}
-                        </span>
-                      </div>
-                    );
-                  })()}
+                <div key={swap.id} className="swaprow">
+                  <span className="swapdate">{fmtDate}</span>
+                  <span className="swaptext">
+                    <span style={{ color: PLAYER_COLORS[p1.pid], fontWeight: 800 }}>{p1.player}</span>
+                    {" swapped "}{TEAMS[p1.gave]?.[1]}{" with "}{p2.player}{" for "}{TEAMS[p1.received]?.[1]}
+                  </span>
+                  {winner
+                    ? <span className="swapnet pos">{winner.player} +{absNet}</span>
+                    : <span className="swapnet zero">+0</span>
+                  }
                 </div>
               );
             })}
@@ -2358,15 +2354,12 @@ const CSS = `
 
 .draftsavemsg{font-size:11px;color:#8BA898;min-height:16px}
 .swaplog{margin-top:28px;padding-top:20px;border-top:1px solid #ffffff14}
-.swaplog-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#8BA898;margin-bottom:14px}
-.swapcard{background:#0E2318;border:1px solid #ffffff10;border-radius:10px;padding:13px 14px;margin-bottom:10px}
-.swapcard-date{font-size:11px;color:#8BA898;font-weight:700;letter-spacing:.05em;margin-bottom:10px}
-.swaprow{display:flex;align-items:center;gap:8px;padding:7px 10px;border-left:3px solid #fff3;border-radius:0 6px 6px 0;background:#00000020;margin-bottom:6px;flex-wrap:wrap;row-gap:3px}
+.swaplog-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#8BA898;margin-bottom:10px}
+.swaprow{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#0E2318;border:1px solid #ffffff10;border-radius:8px;margin-bottom:6px;min-width:0}
 .swaprow:last-child{margin-bottom:0}
-.swapname{font-size:12px;font-weight:800;flex-shrink:0}
-.swaptext{font-size:12px;color:#C8D8CC;flex:1}
+.swapdate{font-size:11px;font-weight:700;color:#8BA898;flex-shrink:0}
+.swaptext{font-size:12px;color:#C8D8CC;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .swapnet{font-size:12px;font-weight:900;flex-shrink:0;white-space:nowrap;padding:3px 8px;border-radius:6px}
 .swapnet.pos{color:#6BC17A;background:#6BC17A18}
-.swapnet.neg{color:#FF6B6B;background:#FF6B6B18}
 .swapnet.zero{color:#8BA898;background:#ffffff08}
 `;
