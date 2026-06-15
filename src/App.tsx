@@ -2012,22 +2012,23 @@ export default function App() {
               return (
                 <div key={swap.id} className="swapcard">
                   <div className="swapcard-date">{fmtDate}</div>
-                  {swap.parties.map((party, i) => {
-                    const opponent = swap.parties[1 - i];
-                    const gavePts = teamPtsSince(party.gave, swap.date, state.apiMatches);
-                    const color = PLAYER_COLORS[party.pid];
+                  {(() => {
+                    const [p1, p2] = swap.parties;
+                    const p1Pts = teamPtsSince(p1.gave, swap.date, state.apiMatches);
+                    const p2Pts = teamPtsSince(p2.gave, swap.date, state.apiMatches);
+                    const net = Math.abs(p1Pts - p2Pts);
                     return (
-                      <div key={party.player} className="swaprow" style={{ borderLeftColor: color }}>
-                        <span className="swapname" style={{ color }}>{party.player}</span>
+                      <div className="swaprow" style={{ borderLeftColor: PLAYER_COLORS[p1.pid] }}>
+                        <span className="swapname" style={{ color: PLAYER_COLORS[p1.pid] }}>{p1.player}</span>
                         <span className="swaptext">
-                          swapped {TEAMS[party.gave]?.[1]} to {opponent.player} for {TEAMS[party.received]?.[1]}
+                          swapped {TEAMS[p1.gave]?.[1]} to {p2.player} for {TEAMS[p1.received]?.[1]}
                         </span>
-                        <span className={`swapnet ${gavePts > 0 ? "neg" : gavePts === 0 ? "zero" : "pos"}`}>
-                          {opponent.player} {gavePts > 0 ? "+" : ""}{gavePts}
+                        <span className={`swapnet ${net > 0 ? "pos" : "zero"}`}>
+                          {net > 0 ? "+" : ""}{net}
                         </span>
                       </div>
                     );
-                  })}
+                  })()}
                 </div>
               );
             })}
