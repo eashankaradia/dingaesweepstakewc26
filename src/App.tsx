@@ -1936,14 +1936,17 @@ export default function App() {
     <div className="app">
       <style>{CSS}</style>
       <header className="hero">
-        <div className="eyebrow">WORLD CUP ’26</div>
+        <div className="eyebrow">WORLD CUP ‘26</div>
         <h1>
           DINGAE
           <br />
           <span>SWEEPSTAKE</span>
         </h1>
-        <div className="rules">
-          6 managers · 8 teams each · Win 3 — Draw 1 — Loss 0
+        <div className="herofoot">
+          <div className="rules">6 managers · 8 teams each · Win 3 — Draw 1 — Loss 0</div>
+          <button className="syncbtn herorefresh" onClick={runSync} disabled={!canRefresh}>
+            {refreshButtonText}
+          </button>
         </div>
       </header>
 
@@ -2041,9 +2044,6 @@ export default function App() {
             <div className="subtle">{filteredMatches.length} shown</div>
           </div>
           <div className="syncbar">
-            <button className="syncbtn" onClick={runSync} disabled={!canRefresh}>
-              {refreshButtonText}
-            </button>
             <span className="syncmsg" style={{ flex: 1 }}>
               {syncMsg ||
                 (!canRefresh
@@ -2355,6 +2355,8 @@ const CSS = `
 }
 
 .draftsavemsg{font-size:11px;color:#8BA898;min-height:16px}
+.herofoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px}
+.herorefresh{font-size:11px;padding:6px 12px;flex-shrink:0}
 .swaplog{margin-top:28px;padding-top:20px;border-top:1px solid #ffffff14}
 .swaplog-hd{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#8BA898;margin-bottom:10px}
 .swaprow{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#0E2318;border:1px solid #ffffff10;border-radius:8px;margin-bottom:6px;min-width:0}
