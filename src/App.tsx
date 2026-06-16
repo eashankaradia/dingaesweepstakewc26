@@ -531,6 +531,9 @@ export default function App() {
   const [draftSaveMsg, setDraftSaveMsg] = useState("");
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareStatsPlayer, setShareStatsPlayer] = useState(null);
+  const [fixturesShareOpen, setFixturesShareOpen] = useState(false);
+  const [fixturesShareDate, setFixturesShareDate] = useState(() => localDateKey(new Date()));
+  const [fixturesShareCompact, setFixturesShareCompact] = useState(false);
 
   useEffect(() => {
     try {
@@ -1305,6 +1308,123 @@ export default function App() {
       const shareText = `${leaderLine ? leaderLine + "\n\n" : ""}Follow the live table: https://dingaesweepstakewc26.vercel.app`;
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title, text: shareText });
+        return;
+      }
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName;
+      link.click();
+      window.open("https://wa.me/?text=" + encodeURIComponent(shareText), "_blank", "noopener,noreferrer");
+    }, "image/png");
+  };
+
+  const shareFixturesImage = async (dateKey, compact) => {
+    const width = 900;
+    const headerH = 118;
+    const footerH = 52;
+    const matches = state.apiMatches
+      .filter((m) => localDateKey(m.date) === dateKey)
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const c = document.createElement("canvas");
+    c.width = width;
+    const rowH = compact ? 48 : 96;
+    const height = headerH + Math.max(matches.length, 1) * rowH + footerH + 20;
+    c.height = height;
+    const ctx = c.getContext("2d");
+
+    ctx.fillStyle = "#0C1F15";
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "#E8B33B";
+    ctx.font = "800 40px Arial";
+    ctx.fillText("FIXTURES & RESULTS", 34, 58);
+    ctx.fillStyle = "#9FBFA8";
+    ctx.font = "20px Arial";
+    ctx.fillText(fmtDateTime(`${dateKey}T00:00:00`).split(",")[0] || dateKey, 34, 90);
+    ctx.font = "18px Arial";
+    ctx.fillText("dingaesweepstakewc26.vercel.app", 34, height - 22);
+
+    if (matches.length === 0) {
+      ctx.fillStyle = "#9FBFA8";
+      ctx.font = "22px Arial";
+      ctx.fillText("No fixtures on this date.", 34, headerH + 40);
+    }
+
+    matches.forEach((m, i) => {
+      const y = headerH + i * rowH;
+      const homeFlag = flagForTeam(m.homeCode, m.homeName);
+      const awayFlag = flagForTeam(m.awayCode, m.awayName);
+      const homeOwner = ownerOf(m.homeCode);
+      const awayOwner = ownerOf(m.awayCode);
+      const winnerCode = winningTeamCode(m);
+      const winnerOwner = winnerCode ? ownerOf(winnerCode) : null;
+      const hScore = typeof m.homeGoals === "number" ? m.homeGoals : compact ? "–" : "";
+      const aScore = typeof m.awayGoals === "number" ? m.awayGoals : compact ? "–" : "";
+      const statusColor = isFinished(m) ? "#E8B33B" : isLive(m) ? "#E0635C" : "#9FBFA8";
+
+      ctx.fillStyle = winnerOwner ? `${winnerOwner.color}20` : "#10271A";
+      ctx.fillRect(24, y + 4, width - 48, rowH - 10);
+      if (winnerOwner) {
+        ctx.fillStyle = winnerOwner.color;
+        ctx.fillRect(24, y + 4, 4, rowH - 10);
+      }
+
+      if (compact) {
+        ctx.fillStyle = statusColor;
+        ctx.font = "800 11px Arial";
+        ctx.fillText(m.status || "NS", 36, y + 22);
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "600 16px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(`${homeFlag} ${nameFor(m.homeCode, m.homeName)}`, 100, y + 30);
+        ctx.font = "800 20px Arial";
+        ctx.fillStyle = "#E8B33B";
+        ctx.textAlign = "center";
+        ctx.fillText(`${hScore}:${aScore}`, width / 2, y + 31);
+        ctx.font = "600 16px Arial";
+        ctx.fillStyle = "#F0EDE2";
+        ctx.textAlign = "right";
+        ctx.fillText(`${nameFor(m.awayCode, m.awayName)} ${awayFlag}`, width - 36, y + 30);
+        ctx.textAlign = "left";
+      } else {
+        ctx.fillStyle = statusColor;
+        ctx.font = "800 13px Arial";
+        ctx.fillText(m.status || "NS", 36, y + 24);
+        ctx.fillStyle = "#9FBFA8";
+        ctx.font = "16px Arial";
+        ctx.fillText(`${matchDisplayRound(m)}   ${m.date ? fmtDateTime(m.date) : ""}`, 110, y + 24);
+
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 22px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(`${homeFlag} ${nameFor(m.homeCode, m.homeName)}`, 36, y + 56);
+        ctx.fillStyle = homeOwner ? homeOwner.color : "#5d7a66";
+        ctx.font = "600 14px Arial";
+        ctx.fillText(homeOwner ? homeOwner.name : "unmapped", 36, y + 78);
+
+        ctx.fillStyle = "#E8B33B";
+        ctx.font = "800 30px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(`${hScore}:${aScore}`, width / 2, y + 64);
+
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 22px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText(`${nameFor(m.awayCode, m.awayName)} ${awayFlag}`, width - 36, y + 56);
+        ctx.fillStyle = awayOwner ? awayOwner.color : "#5d7a66";
+        ctx.font = "600 14px Arial";
+        ctx.fillText(awayOwner ? awayOwner.name : "unmapped", width - 36, y + 78);
+        ctx.textAlign = "left";
+      }
+    });
+
+    const fileName = `dingae-sweepstake-fixtures-${dateKey}.png`;
+    c.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], fileName, { type: "image/png" });
+      const shareText = `Fixtures for ${dateKey}: https://dingaesweepstakewc26.vercel.app`;
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Fixtures & Results", text: shareText });
         return;
       }
       const link = document.createElement("a");
@@ -2316,7 +2436,15 @@ export default function App() {
         <section className="pane">
           <div className="panehead">
             <h2>Fixtures & Results</h2>
-            <div className="subtle">{filteredMatches.length} shown</div>
+            <div className="resultsheadright">
+              <div className="subtle">{filteredMatches.length} shown</div>
+              <button
+                className="editdraftbtn"
+                onClick={() => { setFixturesShareDate(localDateKey(new Date())); setFixturesShareOpen(true); }}
+              >
+                Share fixtures
+              </button>
+            </div>
           </div>
           {(() => {
             const hasActive = resultFilter !== "all" || resultGroupFilter !== "all" || resultDateFilter || resultCountryFilter !== "all" || resultStatusFilter !== "all";
@@ -2536,6 +2664,50 @@ export default function App() {
         </div>
       )}
 
+      {fixturesShareOpen && (() => {
+        const today = localDateKey(new Date());
+        const yesterday = localDateKey(new Date(Date.now() - 86400000));
+        const tomorrow = localDateKey(new Date(Date.now() + 86400000));
+        return (
+          <div className="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="fixtures-share-title" onClick={() => setFixturesShareOpen(false)}>
+            <div className="modalCard sharemodal" onClick={(e) => e.stopPropagation()}>
+              <h3 id="fixtures-share-title">Share fixtures</h3>
+              <p className="modalText">Pick a date to render its fixtures as an image and share to WhatsApp.</p>
+              <div className="filterrow filterrow-status">
+                <button className={`statusbtn ${fixturesShareDate === yesterday ? "on" : ""}`} onClick={() => setFixturesShareDate(yesterday)}>Yesterday</button>
+                <button className={`statusbtn ${fixturesShareDate === today ? "on" : ""}`} onClick={() => setFixturesShareDate(today)}>Today</button>
+                <button className={`statusbtn ${fixturesShareDate === tomorrow ? "on" : ""}`} onClick={() => setFixturesShareDate(tomorrow)}>Tomorrow</button>
+              </div>
+              <input
+                className="filterselect date"
+                type="date"
+                value={fixturesShareDate}
+                onChange={(e) => setFixturesShareDate(e.target.value)}
+                style={{ marginTop: 8 }}
+              />
+              <label className="togglelabel" style={{ marginTop: 10 }}>
+                <span>{fixturesShareCompact ? "Compact" : "Expanded"}</span>
+                <span className={`toggleswitch ${fixturesShareCompact ? "on" : ""}`} onClick={() => setFixturesShareCompact((v) => !v)} role="switch" aria-checked={fixturesShareCompact}>
+                  <span className="toggleknob" />
+                </span>
+              </label>
+              <div className="modalButtons">
+                <button className="modalCancel" onClick={() => setFixturesShareOpen(false)}>Cancel</button>
+                <button
+                  className="modalUnlock"
+                  onClick={() => {
+                    shareFixturesImage(fixturesShareDate, fixturesShareCompact);
+                    setFixturesShareOpen(false);
+                  }}
+                >
+                  Share
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {showPasswordModal && (
         <div className="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="edit-draft-title">
           <div className="modalCard">
@@ -2608,6 +2780,7 @@ const CSS = `
 .teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:6px}.teamstatcard.compact{display:grid;grid-template-columns:1fr auto;gap:3px 7px;padding:8px;border-left:4px solid #ffffff22}.teamstatcard.compact b{grid-column:1/-1;font-size:12.5px}.teamstatcard.compact span{font-size:11px}.teamstatcard.rag-green{border-left-color:#31c46b;background:rgba(49,196,107,.10)}.teamstatcard.rag-amber{border-left-color:#e8a23b;background:rgba(232,162,59,.10)}.teamstatcard.rag-red{border-left-color:#df5548;background:rgba(223,85,72,.10)}.trophygrid.compact{gap:5px}.trophyrow.compact,.trophyrow.trophyhead{display:grid;grid-template-columns:1fr 58px 66px;gap:8px;align-items:center;padding:7px 8px;border:1px solid #ffffff12;border-radius:8px;background:#0C1F15;font-size:12px}.trophyrow.trophyhead{background:transparent;color:#9FBFA8;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.trophyrow.compact b{font-family:'Saira Condensed';font-size:18px;color:#E8B33B}.grow,.grow.qualrow{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}.grow.ghead{grid-template-columns:1.15fr .8fr 28px 34px 34px 58px}@media(max-width:560px){.grow,.grow.qualrow,.grow.ghead{grid-template-columns:1.05fr .72fr 24px 28px 28px 48px;font-size:10.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:1fr 50px 54px 44px;font-size:11px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* mobile cleanup overrides */
+.resultsheadright{display:flex;align-items:center;gap:10px}
 .managerpill{display:inline-flex;align-items:center;justify-content:center;border:1px solid;border-radius:999px;padding:3px 8px;color:#F0EDE2;font-weight:800;font-size:11px;line-height:1.1;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.managerpill.small{font-size:10px;padding:2px 6px}.managerpill.none{border-color:#5d665e;background:#5d665e22;color:#C8D8CC}.owner .dot,.legenddot{display:none}.match.managerwin{box-shadow:0 0 0 1px #ffffff0d inset}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px}.trophyrow.compact .trophybar{height:8px;min-width:60px}.trophyrow.compact b{font-size:16px;text-align:right}.dotrow{grid-template-columns:auto 1fr;align-items:center}.dotlabel{min-width:82px}.dotsline{align-items:center}.outcomedot{width:9px;height:9px}.teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}.teamstatcard.compact{padding:7px;gap:2px}.teamstatcard.compact b{font-size:12px}.teamstatcard.compact span,.teamstatcard.compact small{font-size:10.5px}.todaybtn.on{background:#E8B33B;color:#0C1F15;border-color:#E8B33B;font-weight:800}.filtercollapse{align-items:stretch}.filtercollapse .clearfilterbtn{min-height:34px}.scoreline{gap:6px}.teamcell{min-width:0}.grpbadge{letter-spacing:.08em}.grow{min-width:0}.grow span{min-width:0;overflow:hidden;text-overflow:ellipsis}.brow span{min-width:0;overflow:hidden;text-overflow:ellipsis}@media(max-width:560px){.pane{padding:12px 10px}.hero{padding:20px 14px 14px}h1{font-size:38px}.panehead{align-items:flex-start}.match,.lockcard,.chartbox,.groupbox,.board{padding:8px;border-radius:9px}.matchmeta{gap:5px}.city{font-size:10.5px}.tname{font-size:12px}.scorebox.readonly{font-size:20px;gap:4px}.brow{grid-template-columns:20px minmax(72px,1fr) 23px 20px 20px 20px 28px 34px 36px;padding:9px 6px;font-size:10.5px}.brow.bhead{font-size:8px}.managerpill{font-size:10px;padding:3px 6px}.managerpill.small{font-size:9.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(82px,1fr) minmax(54px,.8fr) 38px;gap:5px;padding:6px}.trophyrow.compact b{font-size:15px}.dotrow{grid-template-columns:1fr}.dotsline{gap:3px}.outcomedot{width:8px;height:8px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.mystatcards{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.mystatcard{padding:8px}.mystatcard span{font-size:9px}.mystatcard b{font-size:18px}.filtercollapse{display:grid;grid-template-columns:1fr 1fr;gap:7px}.filtercollapse .clearfilterbtn{width:100%}.filterpanel{gap:6px;padding:8px}.groupsview{grid-template-columns:1fr}.charthead{align-items:flex-start}.calendarpill{font-size:10.5px}}
 
 
