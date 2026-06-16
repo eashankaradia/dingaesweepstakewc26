@@ -534,6 +534,7 @@ export default function App() {
   const [fixturesShareOpen, setFixturesShareOpen] = useState(false);
   const [fixturesShareDate, setFixturesShareDate] = useState(() => localDateKey(new Date()));
   const [fixturesShareCompact, setFixturesShareCompact] = useState(false);
+  const [draftSearch, setDraftSearch] = useState("");
 
   useEffect(() => {
     try {
@@ -2356,7 +2357,20 @@ export default function App() {
               {draftSaveMsg && <span className="draftsavemsg">{draftSaveMsg}</span>}
             </div>
           </div>
-          {state.players.map((p) => (
+          <input
+            className="filterselect draftsearch"
+            type="text"
+            placeholder="Search for a team…"
+            value={draftSearch}
+            onChange={(e) => setDraftSearch(e.target.value)}
+            aria-label="Search teams in draft"
+          />
+          {state.players.map((p) => {
+            const teamsForPlayer = TEAM_IDS.filter((t) => state.ownership[t] === p.id);
+            const q = draftSearch.trim().toLowerCase();
+            const visibleTeams = q ? teamsForPlayer.filter((t) => TEAMS[t][0].toLowerCase().includes(q)) : teamsForPlayer;
+            if (q && visibleTeams.length === 0) return null;
+            return (
             <div key={p.id} className="lockcard draftmanagercard" style={{ background: `${PLAYER_COLORS[p.id]}18`, borderLeft: `4px solid ${PLAYER_COLORS[p.id]}` }}>
               <div className="lockname">
                 {editingDraft ? (
@@ -2372,7 +2386,7 @@ export default function App() {
                 )}
               </div>
               <div className="lockrow">
-                {TEAM_IDS.filter((t) => state.ownership[t] === p.id).map(
+                {visibleTeams.map(
                   (t) => (
                     <span
                       key={t}
@@ -2398,7 +2412,8 @@ export default function App() {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
           <DraftRankingVisual />
 
           <div className="swaplog">
@@ -2781,6 +2796,7 @@ const CSS = `
 
 /* mobile cleanup overrides */
 .resultsheadright{display:flex;align-items:center;gap:10px}
+.draftsearch{width:100%;margin-bottom:10px}
 .managerpill{display:inline-flex;align-items:center;justify-content:center;border:1px solid;border-radius:999px;padding:3px 8px;color:#F0EDE2;font-weight:800;font-size:11px;line-height:1.1;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.managerpill.small{font-size:10px;padding:2px 6px}.managerpill.none{border-color:#5d665e;background:#5d665e22;color:#C8D8CC}.owner .dot,.legenddot{display:none}.match.managerwin{box-shadow:0 0 0 1px #ffffff0d inset}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px}.trophyrow.compact .trophybar{height:8px;min-width:60px}.trophyrow.compact b{font-size:16px;text-align:right}.dotrow{grid-template-columns:auto 1fr;align-items:center}.dotlabel{min-width:82px}.dotsline{align-items:center}.outcomedot{width:9px;height:9px}.teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}.teamstatcard.compact{padding:7px;gap:2px}.teamstatcard.compact b{font-size:12px}.teamstatcard.compact span,.teamstatcard.compact small{font-size:10.5px}.todaybtn.on{background:#E8B33B;color:#0C1F15;border-color:#E8B33B;font-weight:800}.filtercollapse{align-items:stretch}.filtercollapse .clearfilterbtn{min-height:34px}.scoreline{gap:6px}.teamcell{min-width:0}.grpbadge{letter-spacing:.08em}.grow{min-width:0}.grow span{min-width:0;overflow:hidden;text-overflow:ellipsis}.brow span{min-width:0;overflow:hidden;text-overflow:ellipsis}@media(max-width:560px){.pane{padding:12px 10px}.hero{padding:20px 14px 14px}h1{font-size:38px}.panehead{align-items:flex-start}.match,.lockcard,.chartbox,.groupbox,.board{padding:8px;border-radius:9px}.matchmeta{gap:5px}.city{font-size:10.5px}.tname{font-size:12px}.scorebox.readonly{font-size:20px;gap:4px}.brow{grid-template-columns:20px minmax(72px,1fr) 23px 20px 20px 20px 28px 34px 36px;padding:9px 6px;font-size:10.5px}.brow.bhead{font-size:8px}.managerpill{font-size:10px;padding:3px 6px}.managerpill.small{font-size:9.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(82px,1fr) minmax(54px,.8fr) 38px;gap:5px;padding:6px}.trophyrow.compact b{font-size:15px}.dotrow{grid-template-columns:1fr}.dotsline{gap:3px}.outcomedot{width:8px;height:8px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.mystatcards{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.mystatcard{padding:8px}.mystatcard span{font-size:9px}.mystatcard b{font-size:18px}.filtercollapse{display:grid;grid-template-columns:1fr 1fr;gap:7px}.filtercollapse .clearfilterbtn{width:100%}.filterpanel{gap:6px;padding:8px}.groupsview{grid-template-columns:1fr}.charthead{align-items:flex-start}.calendarpill{font-size:10.5px}}
 
 
