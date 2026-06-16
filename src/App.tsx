@@ -529,7 +529,7 @@ export default function App() {
   const [editPassword, setEditPassword] = useState("");
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftSaveMsg, setDraftSaveMsg] = useState("");
-  const [shareView, setShareView] = useState("league");
+  const [shareModalOpen, setShareModalOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -978,86 +978,332 @@ export default function App() {
       .sort((a, b) => Math.abs(b.movement) - Math.abs(a.movement) || a.name.localeCompare(b.name));
   }, [rankRace, state.players]);
 
+  const SHAREABLE_VISUALS = [
+    { key: "league", label: "League Table", group: "Tournament" },
+    { key: "trophy", label: "Trophy Chances", group: "Tournament" },
+    { key: "country", label: "Country Performance", group: "Tournament" },
+    { key: "points", label: "Points Race", group: "Tournament" },
+    { key: "position", label: "Position Race", group: "Tournament" },
+    { key: "dots", label: "Result Dots", group: "Tournament" },
+    { key: "heatmap", label: "Ownership Heatmap", group: "Tournament" },
+    { key: "myteams", label: "My Teams", group: "MyStats" },
+    { key: "myopponents", label: "My Opponents", group: "MyStats" },
+    { key: "rivalries", label: "Manager Rivalries", group: "MyStats" },
+    { key: "mydots", label: "My Result Dots", group: "MyStats" },
+  ];
+
   const shareImageToWhatsApp = async (view = "league") => {
-    const isTrophy = view === "trophy";
     const width = 900;
-    const rowH = 58;
     const headerH = 118;
     const footerH = 52;
-    const rows = (isTrophy ? trophyChances : board).slice(0, 6);
-    const height = headerH + rows.length * rowH + footerH;
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const selectedId = Number(statsPlayer);
+    const selected = state.players.find((p) => p.id === selectedId) || state.players[0];
+    const selectedColor = PLAYER_COLORS[selected.id];
+    const selectedTeams = TEAM_IDS.filter((tid) => state.ownership[tid] === selected.id);
 
-    ctx.fillStyle = "#0C1F15";
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = "#E8B33B";
-    ctx.font = "800 44px Arial";
-    ctx.fillText(isTrophy ? "TROPHY CHANCES" : "DINGAE SWEEPSTAKE", 34, 58);
-    ctx.fillStyle = "#9FBFA8";
-    ctx.font = "20px Arial";
-    ctx.fillText(`Updated ${fmtDateTime(new Date())}`, 34, 90);
+    const makeCanvas = (h) => {
+      const c = document.createElement("canvas");
+      c.width = width;
+      c.height = h;
+      return { c, cctx: c.getContext("2d") };
+    };
 
-    ctx.fillStyle = "#10271A";
-    ctx.fillRect(24, 108, width - 48, rows.length * rowH + 12);
+    const drawHeaderFooter = (cctx, h, t) => {
+      cctx.fillStyle = "#0C1F15";
+      cctx.fillRect(0, 0, width, h);
+      cctx.fillStyle = "#E8B33B";
+      cctx.font = "800 40px Arial";
+      cctx.fillText(t, 34, 58);
+      cctx.fillStyle = "#9FBFA8";
+      cctx.font = "20px Arial";
+      cctx.fillText(`Updated ${fmtDateTime(new Date())}`, 34, 90);
+      cctx.fillStyle = "#9FBFA8";
+      cctx.font = "18px Arial";
+      cctx.fillText("dingaesweepstakewc26.vercel.app", 34, h - 22);
+    };
 
-    rows.forEach((p, i) => {
-      const y = headerH + i * rowH;
-      if (i === 0 && (isTrophy ? p.chance > 0 : p.pts > 0)) {
-        ctx.fillStyle = "rgba(232,179,59,0.14)";
-        ctx.fillRect(24, y - 4, width - 48, rowH);
+    let canvas, ctx, height, title = "", leaderLine = "";
+
+    if (view === "league" || view === "trophy") {
+      const isTrophy = view === "trophy";
+      const rowH = 58;
+      const rows = (isTrophy ? trophyChances : board).slice(0, 6);
+      title = isTrophy ? "TROPHY CHANCES" : "DINGAE SWEEPSTAKE";
+      height = headerH + rows.length * rowH + footerH;
+      ({ c: canvas, cctx: ctx } = makeCanvas(height));
+      drawHeaderFooter(ctx, height, title);
+      ctx.fillStyle = "#10271A";
+      ctx.fillRect(24, 108, width - 48, rows.length * rowH + 12);
+      rows.forEach((p, i) => {
+        const y = headerH + i * rowH;
+        if (i === 0 && (isTrophy ? p.chance > 0 : p.pts > 0)) {
+          ctx.fillStyle = "rgba(232,179,59,0.14)";
+          ctx.fillRect(24, y - 4, width - 48, rowH);
+        }
+        ctx.fillStyle = PLAYER_COLORS[p.id] || "#E8B33B";
+        ctx.beginPath();
+        ctx.arc(52, y + 22, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 24px Arial";
+        ctx.fillText(`${i + 1}. ${p.name}`, 76, y + 31);
+        ctx.fillStyle = "#9FBFA8";
+        ctx.font = "18px Arial";
+        if (isTrophy) ctx.fillText(`Pts ${p.pts}   Alive ${p.alive}`, 280, y + 31);
+        else ctx.fillText(`GP ${p.gp}   W ${p.w}   D ${p.d}   L ${p.l}   GD ${gdText(p.gd)}   Alive ${p.alive}`, 280, y + 31);
+        ctx.fillStyle = "#E8B33B";
+        ctx.font = "800 30px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText(isTrophy ? `${p.chance}%` : `${p.pts} pts`, width - 42, y + 34);
+        ctx.textAlign = "left";
+      });
+      const leader = rows[0], second = rows[1];
+      if (isTrophy) {
+        if (leader) leaderLine = `${leader.name} has the best shot at the title, at ${leader.chance}%.`;
+      } else {
+        const gap = leader && second ? leader.pts - second.pts : 0;
+        if (leader) leaderLine = gap === 0 ? `${leader.name} and ${second?.name} are level on points.` : `${leader.name} is winning by ${gap} point${gap === 1 ? "" : "s"}.`;
       }
-      ctx.fillStyle = PLAYER_COLORS[p.id] || "#E8B33B";
+    } else if (view === "country") {
+      title = "COUNTRY PERFORMANCE";
+      const rowH = 54;
+      const rows = TEAM_IDS.map((tid) => ({
+        tid,
+        stats: tournamentData.teamStats[tid] || { pts: 0, gd: 0 },
+        owner: ownerOf(tid),
+        odds: countryOddsByTeam[tid] || 0,
+      })).sort((a, b) => b.stats.pts - a.stats.pts || b.stats.gd - a.stats.gd || b.odds - a.odds).slice(0, 10);
+      height = headerH + rows.length * rowH + footerH;
+      ({ c: canvas, cctx: ctx } = makeCanvas(height));
+      drawHeaderFooter(ctx, height, title);
+      ctx.fillStyle = "#10271A";
+      ctx.fillRect(24, 108, width - 48, rows.length * rowH + 12);
+      rows.forEach((r, i) => {
+        const y = headerH + i * rowH;
+        if (r.owner) {
+          ctx.fillStyle = `${r.owner.color}22`;
+          ctx.fillRect(24, y - 4, width - 48, rowH);
+        }
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 22px Arial";
+        ctx.fillText(`${TEAMS[r.tid][1]} ${TEAMS[r.tid][0]}`, 40, y + 24);
+        ctx.fillStyle = "#9FBFA8";
+        ctx.font = "15px Arial";
+        ctx.fillText(`${r.owner ? r.owner.name : "Unclaimed"}  ·  Pts ${r.stats.pts}  ·  GD ${gdText(r.stats.gd)}`, 40, y + 44);
+        ctx.fillStyle = "#E8B33B";
+        ctx.font = "800 24px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText(`${r.odds.toFixed(1)}%`, width - 42, y + 32);
+        ctx.textAlign = "left";
+      });
+      leaderLine = rows[0] ? `${TEAMS[rows[0].tid][0]} leads the table with ${rows[0].stats.pts} points.` : "";
+    } else if (view === "points" || view === "position") {
+      const isPoints = view === "points";
+      title = isPoints ? "POINTS RACE" : "POSITION RACE";
+      const players = state.players;
+      const data = isPoints ? pointsRace : rankRace;
+      const finishedCount = Math.max(0, data.length - 1);
+      const chartH = 380;
+      const legendH = 90;
+      height = headerH + chartH + legendH + footerH;
+      ({ c: canvas, cctx: ctx } = makeCanvas(height));
+      drawHeaderFooter(ctx, height, title);
+      const padL = 50, padR = 30;
+      const padT = headerH + 16;
+      const padB = headerH + chartH - 16;
+      const innerW = width - padL - padR;
+      const innerH = padB - padT;
+      const maxPts = isPoints ? Math.max(3, ...data.flatMap((row) => players.map((p) => row.scores[p.id] || 0))) : Math.max(1, players.length);
+      const xFor = (game) => padL + (finishedCount === 0 ? 0 : (game / finishedCount) * innerW);
+      const yFor = (v) => isPoints ? padT + innerH - (v / maxPts) * innerH : padT + ((v - 1) / Math.max(1, players.length - 1)) * innerH;
+      ctx.strokeStyle = "#ffffff2a";
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(52, y + 22, 8, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#F0EDE2";
-      ctx.font = "700 24px Arial";
-      ctx.fillText(`${i + 1}. ${p.name}`, 76, y + 31);
-
+      ctx.moveTo(padL, padT);
+      ctx.lineTo(padL, padB);
+      ctx.lineTo(width - padR, padB);
+      ctx.stroke();
+      players.forEach((p) => {
+        const points = data.map((row) => [xFor(row.game), yFor(isPoints ? (row.scores[p.id] || 0) : (row.positions[p.id] || players.length))]);
+        ctx.strokeStyle = PLAYER_COLORS[p.id];
+        ctx.lineWidth = 4;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        points.forEach(([x, y], idx) => (idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+        ctx.stroke();
+        const last = points[points.length - 1];
+        if (last) {
+          ctx.fillStyle = PLAYER_COLORS[p.id];
+          ctx.beginPath();
+          ctx.arc(last[0], last[1], 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+      let lx = padL, ly = padB + 46;
+      players.forEach((p) => {
+        ctx.fillStyle = PLAYER_COLORS[p.id];
+        ctx.beginPath();
+        ctx.arc(lx, ly, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 16px Arial";
+        ctx.fillText(p.name, lx + 12, ly + 5);
+        lx += 12 + ctx.measureText(p.name).width + 28;
+        if (lx > width - 110) {
+          lx = padL;
+          ly += 28;
+        }
+      });
+    } else if (view === "dots" || view === "mydots") {
+      const isMine = view === "mydots";
+      const players = isMine ? [selected] : state.players;
+      title = isMine ? `${selected.name.toUpperCase()}'S RESULTS` : "RESULT DOTS";
+      const rowH = 50;
+      height = headerH + players.length * rowH + footerH + 10;
+      ({ c: canvas, cctx: ctx } = makeCanvas(height));
+      drawHeaderFooter(ctx, height, title);
+      const colorFor = { w: "#31c46b", d: "#e8a23b", l: "#df5548", future: "#68736b" };
+      players.forEach((p, i) => {
+        const y = headerH + i * rowH + 20;
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 20px Arial";
+        ctx.fillText(p.name, 34, y + 6);
+        let dx = 220;
+        (outcomeMatrix[p.id] || []).forEach((o) => {
+          ctx.fillStyle = colorFor[o.result] || colorFor.future;
+          ctx.beginPath();
+          ctx.arc(dx, y, 7, 0, Math.PI * 2);
+          ctx.fill();
+          dx += 18;
+        });
+      });
+    } else if (view === "heatmap") {
+      title = "OWNERSHIP HEATMAP";
+      const cols = 3;
+      const colW = 280;
+      const rowH = 24;
+      const groupH = 22 + 4 * rowH + 18;
+      const rowsOfGroups = Math.ceil(GROUPS.length / cols);
+      height = headerH + rowsOfGroups * groupH + footerH;
+      ({ c: canvas, cctx: ctx } = makeCanvas(height));
+      drawHeaderFooter(ctx, height, title);
+      GROUPS.forEach((g, gi) => {
+        const col = gi % cols;
+        const row = Math.floor(gi / cols);
+        const baseX = 34 + col * colW;
+        let y = headerH + row * groupH + 16;
+        ctx.fillStyle = "#E8B33B";
+        ctx.font = "800 16px Arial";
+        ctx.fillText(`Group ${g}`, baseX, y);
+        y += 22;
+        TEAM_IDS.filter((tid) => TEAMS[tid][2] === g).forEach((tid) => {
+          const o = ownerOf(tid);
+          ctx.fillStyle = o ? o.color : "#5d665e";
+          ctx.fillRect(baseX, y - 13, 8, 15);
+          ctx.fillStyle = "#F0EDE2";
+          ctx.font = "13px Arial";
+          ctx.fillText(`${TEAMS[tid][1]} ${nameFor(tid)} — ${o ? o.name : "—"}`, baseX + 14, y);
+          y += rowH;
+        });
+      });
+    } else if (view === "myteams") {
+      title = `${selected.name.toUpperCase()}'S TEAMS`;
+      const rowH = 54;
+      const rows = selectedTeams
+        .slice()
+        .sort((a, b) => (countryOddsByTeam[b] || 0) - (countryOddsByTeam[a] || 0))
+        .map((tid) => ({ tid, stats: tournamentData.teamStats[tid], odds: countryOddsByTeam[tid] || 0 }));
+      height = headerH + Math.max(1, rows.length) * rowH + footerH;
+      ({ c: canvas, cctx: ctx } = makeCanvas(height));
+      drawHeaderFooter(ctx, height, title);
+      ctx.fillStyle = "#10271A";
+      ctx.fillRect(24, 108, width - 48, Math.max(1, rows.length) * rowH + 12);
+      rows.forEach((r, i) => {
+        const y = headerH + i * rowH;
+        ctx.fillStyle = `${selectedColor}22`;
+        ctx.fillRect(24, y - 4, width - 48, rowH);
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 22px Arial";
+        ctx.fillText(`${TEAMS[r.tid][1]} ${TEAMS[r.tid][0]}`, 40, y + 24);
+        ctx.fillStyle = "#9FBFA8";
+        ctx.font = "15px Arial";
+        ctx.fillText(`#${FIFA_RANKINGS[r.tid] || "—"}  ·  Pts ${r.stats.pts}  ·  GD ${gdText(r.stats.gd)}`, 40, y + 44);
+        ctx.fillStyle = selectedColor;
+        ctx.font = "800 24px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText(`${r.odds.toFixed(1)}%`, width - 42, y + 32);
+        ctx.textAlign = "left";
+      });
+      leaderLine = `${selected.name} owns ${rows.length} team${rows.length === 1 ? "" : "s"}.`;
+    } else if (view === "myopponents") {
+      title = `${selected.name.toUpperCase()}'S OPPONENTS`;
+      const rowH = 50;
+      const rows = selectedTeams.slice().sort((a, b) => (FIFA_RANKINGS[a] || 999) - (FIFA_RANKINGS[b] || 999)).map((tid) => ({
+        tid,
+        opponents: state.apiMatches
+          .filter((m) => m.homeCode === tid || m.awayCode === tid)
+          .slice()
+          .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
+          .map((m) => ({ opp: m.homeCode === tid ? m.awayCode : m.homeCode, result: resultClassForTeam(m, tid) })),
+      }));
+      height = headerH + Math.max(1, rows.length) * rowH + footerH + 10;
+      ({ c: canvas, cctx: ctx } = makeCanvas(height));
+      drawHeaderFooter(ctx, height, title);
+      const colorFor = { w: "#31c46b", d: "#e8a23b", l: "#df5548", future: "#68736b" };
+      rows.forEach((r, i) => {
+        const y = headerH + i * rowH + 16;
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 18px Arial";
+        ctx.fillText(`${TEAMS[r.tid][1]} ${nameFor(r.tid)}`, 34, y + 5);
+        let dx = 320;
+        r.opponents.forEach((o) => {
+          ctx.fillStyle = colorFor[o.result] || colorFor.future;
+          ctx.beginPath();
+          ctx.arc(dx, y, 7, 0, Math.PI * 2);
+          ctx.fill();
+          dx += 18;
+        });
+      });
+    } else if (view === "rivalries") {
+      title = "MANAGER RIVALRIES";
+      const rowH = 56;
+      const rows = board.filter((p) => p.id !== selected.id);
+      height = headerH + Math.max(1, rows.length) * rowH + footerH;
+      ({ c: canvas, cctx: ctx } = makeCanvas(height));
+      drawHeaderFooter(ctx, height, title);
       ctx.fillStyle = "#9FBFA8";
       ctx.font = "18px Arial";
-      if (isTrophy) {
-        ctx.fillText(`Pts ${p.pts}   Alive ${p.alive}`, 280, y + 31);
-      } else {
-        ctx.fillText(`GP ${p.gp}   W ${p.w}   D ${p.d}   L ${p.l}   GD ${gdText(p.gd)}   Alive ${p.alive}`, 280, y + 31);
-      }
-
-      ctx.fillStyle = "#E8B33B";
-      ctx.font = "800 30px Arial";
-      ctx.textAlign = "right";
-      ctx.fillText(isTrophy ? `${p.chance}%` : `${p.pts} pts`, width - 42, y + 34);
-      ctx.textAlign = "left";
-    });
-
-    ctx.fillStyle = "#9FBFA8";
-    ctx.font = "18px Arial";
-    ctx.fillText("dingaesweepstakewc26.vercel.app", 34, height - 22);
-
-    const leader = rows[0];
-    const second = rows[1];
-    let leaderLine = "";
-    if (isTrophy) {
-      if (leader) leaderLine = `${leader.name} has the best shot at the title, at ${leader.chance}%.`;
-    } else {
-      const gap = leader && second ? leader.pts - second.pts : 0;
-      if (leader) {
-        if (gap === 0) leaderLine = `${leader.name} and ${second?.name} are level on points.`;
-        else leaderLine = `${leader.name} is winning by ${gap} point${gap === 1 ? "" : "s"}.`;
-      }
+      ctx.fillText(`Head-to-head vs ${selected.name}`, 34, 110);
+      rows.forEach((b, i) => {
+        const y = headerH + i * rowH + 14;
+        ctx.fillStyle = `${PLAYER_COLORS[b.id]}22`;
+        ctx.fillRect(24, y - 4, width - 48, rowH - 10);
+        ctx.fillStyle = "#F0EDE2";
+        ctx.font = "700 20px Arial";
+        ctx.fillText(`vs ${b.name}`, 40, y + 24);
+        const selectedRow = board.find((p) => p.id === selected.id);
+        ctx.fillStyle = "#9FBFA8";
+        ctx.font = "16px Arial";
+        ctx.fillText(`${selectedRow.pts} - ${b.pts} pts  ·  ${selectedRow.alive} - ${b.alive} alive`, 280, y + 24);
+        const diff = selectedRow.pts - b.pts;
+        ctx.fillStyle = diff === 0 ? "#9FBFA8" : diff > 0 ? "#31c46b" : "#df5548";
+        ctx.font = "800 22px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText(diff === 0 ? "Level" : `${diff > 0 ? "+" : ""}${diff}`, width - 42, y + 24);
+        ctx.textAlign = "left";
+      });
     }
 
-    const fileName = isTrophy ? "dingae-sweepstake-trophy-chances.png" : "dingae-sweepstake-table.png";
+    if (!ctx) return;
+
+    const fileName = `dingae-sweepstake-${view}.png`;
     canvas.toBlob(async (blob) => {
       if (!blob) return;
       const file = new File([blob], fileName, { type: "image/png" });
-      const shareText = `${leaderLine}\n\nFollow the live table: https://dingaesweepstakewc26.vercel.app`;
+      const shareText = `${leaderLine ? leaderLine + "\n\n" : ""}Follow the live table: https://dingaesweepstakewc26.vercel.app`;
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: isTrophy ? "Trophy chances" : "Dingae Sweepstake table", text: shareText });
+        await navigator.share({ files: [file], title, text: shareText });
         return;
       }
       const link = document.createElement("a");
@@ -2169,13 +2415,7 @@ export default function App() {
         <section className="pane">
           <div className="panehead">
             <h2>League Table</h2>
-            <div className="sharerow">
-              <select className="filterselect small" value={shareView} onChange={(e) => setShareView(e.target.value)}>
-                <option value="league">League table</option>
-                <option value="trophy">Trophy chances</option>
-              </select>
-              <button className="editdraftbtn" onClick={() => shareImageToWhatsApp(shareView)}>Share image</button>
-            </div>
+            <button className="editdraftbtn" onClick={() => setShareModalOpen(true)}>Share a visual</button>
           </div>
           <div className="subtle tableintro">Points · GD · alive teams</div>
           <div className="leaguebox groupbox">
@@ -2242,6 +2482,48 @@ export default function App() {
 
       {tab === "tournament" && <TournamentTab />}
       {tab === "stats" && <StatsTab />}
+
+      {shareModalOpen && (
+        <div className="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="share-modal-title" onClick={() => setShareModalOpen(false)}>
+          <div className="modalCard sharemodal" onClick={(e) => e.stopPropagation()}>
+            <h3 id="share-modal-title">Share a visual</h3>
+            <p className="modalText">Pick a visual to render as an image and share to WhatsApp.</p>
+            <div className="sharelist">
+              <div className="sharelisthead">Tournament</div>
+              {SHAREABLE_VISUALS.filter((v) => v.group === "Tournament").map((v) => (
+                <button
+                  key={v.key}
+                  className="shareitem"
+                  onClick={() => {
+                    shareImageToWhatsApp(v.key);
+                    setShareModalOpen(false);
+                  }}
+                >
+                  {v.label}
+                </button>
+              ))}
+              <div className="sharelisthead">
+                My stats — {state.players.find((p) => p.id === Number(statsPlayer))?.name || state.players[0].name}
+              </div>
+              {SHAREABLE_VISUALS.filter((v) => v.group === "MyStats").map((v) => (
+                <button
+                  key={v.key}
+                  className="shareitem"
+                  onClick={() => {
+                    shareImageToWhatsApp(v.key);
+                    setShareModalOpen(false);
+                  }}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            <div className="modalButtons">
+              <button className="modalCancel" onClick={() => setShareModalOpen(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPasswordModal && (
         <div className="modalOverlay" role="dialog" aria-modal="true" aria-labelledby="edit-draft-title">
@@ -2380,7 +2662,12 @@ const CSS = `
 
 .draftsavemsg{font-size:11px;color:#8BA898;min-height:16px}
 .herofoot{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:6px}
-.sharerow{display:flex;align-items:center;gap:8px}
+.sharemodal{width:360px}
+.sharelist{display:flex;flex-direction:column;gap:5px;max-height:54vh;overflow-y:auto;margin:4px 0 8px}
+.sharelisthead{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#8BA898;margin:8px 0 2px}
+.sharelisthead:first-child{margin-top:0}
+.shareitem{display:block;width:100%;text-align:left;background:#0C1F15;border:1px solid #ffffff18;border-radius:8px;color:#F0EDE2;padding:9px 11px;font-size:13px;font-weight:600;cursor:pointer}
+.shareitem:hover{border-color:#E8B33B66;background:#E8B33B14}
 .herosync{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .herosync .syncmsg{font-size:11px;color:#9FBFA8;white-space:nowrap}
 .herorefresh{font-size:20px;padding:3px 10px;flex-shrink:0;line-height:1}
