@@ -530,6 +530,7 @@ export default function App() {
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftSaveMsg, setDraftSaveMsg] = useState("");
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareStatsPlayer, setShareStatsPlayer] = useState(null);
 
   useEffect(() => {
     try {
@@ -992,11 +993,11 @@ export default function App() {
     { key: "mydots", label: "My Result Dots", group: "MyStats" },
   ];
 
-  const shareImageToWhatsApp = async (view = "league") => {
+  const shareImageToWhatsApp = async (view = "league", playerId = null) => {
     const width = 900;
     const headerH = 118;
     const footerH = 52;
-    const selectedId = Number(statsPlayer);
+    const selectedId = playerId != null ? Number(playerId) : Number(statsPlayer);
     const selected = state.players.find((p) => p.id === selectedId) || state.players[0];
     const selectedColor = PLAYER_COLORS[selected.id];
     const selectedTeams = TEAM_IDS.filter((tid) => state.ownership[tid] === selected.id);
@@ -2415,7 +2416,7 @@ export default function App() {
         <section className="pane">
           <div className="panehead">
             <h2>League Table</h2>
-            <button className="editdraftbtn" onClick={() => setShareModalOpen(true)}>Share a visual</button>
+            <button className="editdraftbtn" onClick={() => { setShareStatsPlayer(statsPlayer); setShareModalOpen(true); }}>Share a visual</button>
           </div>
           <div className="subtle tableintro">Points · GD · alive teams</div>
           <div className="leaguebox groupbox">
@@ -2502,15 +2503,25 @@ export default function App() {
                   {v.label}
                 </button>
               ))}
-              <div className="sharelisthead">
-                My stats — {state.players.find((p) => p.id === Number(statsPlayer))?.name || state.players[0].name}
+              <div className="sharelisthead sharelistheadrow">
+                <span>My stats</span>
+                <select
+                  className="filterselect small"
+                  value={shareStatsPlayer ?? statsPlayer}
+                  onChange={(e) => setShareStatsPlayer(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {state.players.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
               </div>
               {SHAREABLE_VISUALS.filter((v) => v.group === "MyStats").map((v) => (
                 <button
                   key={v.key}
                   className="shareitem"
                   onClick={() => {
-                    shareImageToWhatsApp(v.key);
+                    shareImageToWhatsApp(v.key, shareStatsPlayer ?? statsPlayer);
                     setShareModalOpen(false);
                   }}
                 >
@@ -2665,6 +2676,8 @@ const CSS = `
 .sharemodal{width:360px}
 .sharelist{display:flex;flex-direction:column;gap:5px;max-height:54vh;overflow-y:auto;margin:4px 0 8px}
 .sharelisthead{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#8BA898;margin:8px 0 2px}
+.sharelistheadrow{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sharelistheadrow select{min-width:0;text-transform:none;font-weight:700;font-size:11.5px;padding:4px 7px}
 .sharelisthead:first-child{margin-top:0}
 .shareitem{display:block;width:100%;text-align:left;background:#0C1F15;border:1px solid #ffffff18;border-radius:8px;color:#F0EDE2;padding:9px 11px;font-size:13px;font-weight:600;cursor:pointer}
 .shareitem:hover{border-color:#E8B33B66;background:#E8B33B14}
