@@ -529,6 +529,7 @@ export default function App() {
   const [editPassword, setEditPassword] = useState("");
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftSaveMsg, setDraftSaveMsg] = useState("");
+  const [shareView, setShareView] = useState("league");
 
   useEffect(() => {
     try {
@@ -977,12 +978,13 @@ export default function App() {
       .sort((a, b) => Math.abs(b.movement) - Math.abs(a.movement) || a.name.localeCompare(b.name));
   }, [rankRace, state.players]);
 
-  const shareTableImageToWhatsApp = async () => {
+  const shareImageToWhatsApp = async (view = "league") => {
+    const isTrophy = view === "trophy";
     const width = 900;
     const rowH = 58;
     const headerH = 118;
     const footerH = 52;
-    const rows = board.slice(0, 6);
+    const rows = (isTrophy ? trophyChances : board).slice(0, 6);
     const height = headerH + rows.length * rowH + footerH;
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -994,7 +996,7 @@ export default function App() {
     ctx.fillRect(0, 0, width, height);
     ctx.fillStyle = "#E8B33B";
     ctx.font = "800 44px Arial";
-    ctx.fillText("DINGAE SWEEPSTAKE", 34, 58);
+    ctx.fillText(isTrophy ? "TROPHY CHANCES" : "DINGAE SWEEPSTAKE", 34, 58);
     ctx.fillStyle = "#9FBFA8";
     ctx.font = "20px Arial";
     ctx.fillText(`Updated ${fmtDateTime(new Date())}`, 34, 90);
@@ -1004,7 +1006,7 @@ export default function App() {
 
     rows.forEach((p, i) => {
       const y = headerH + i * rowH;
-      if (i === 0 && p.pts > 0) {
+      if (i === 0 && (isTrophy ? p.chance > 0 : p.pts > 0)) {
         ctx.fillStyle = "rgba(232,179,59,0.14)";
         ctx.fillRect(24, y - 4, width - 48, rowH);
       }
@@ -1019,12 +1021,16 @@ export default function App() {
 
       ctx.fillStyle = "#9FBFA8";
       ctx.font = "18px Arial";
-      ctx.fillText(`GP ${p.gp}   W ${p.w}   D ${p.d}   L ${p.l}   GD ${gdText(p.gd)}   Alive ${p.alive}`, 280, y + 31);
+      if (isTrophy) {
+        ctx.fillText(`Pts ${p.pts}   Alive ${p.alive}`, 280, y + 31);
+      } else {
+        ctx.fillText(`GP ${p.gp}   W ${p.w}   D ${p.d}   L ${p.l}   GD ${gdText(p.gd)}   Alive ${p.alive}`, 280, y + 31);
+      }
 
       ctx.fillStyle = "#E8B33B";
       ctx.font = "800 30px Arial";
       ctx.textAlign = "right";
-      ctx.fillText(`${p.pts} pts`, width - 42, y + 34);
+      ctx.fillText(isTrophy ? `${p.chance}%` : `${p.pts} pts`, width - 42, y + 34);
       ctx.textAlign = "left";
     });
 
@@ -1032,26 +1038,31 @@ export default function App() {
     ctx.font = "18px Arial";
     ctx.fillText("dingaesweepstakewc26.vercel.app", 34, height - 22);
 
-    const leader = board[0];
-    const second = board[1];
-    const gap = leader && second ? leader.pts - second.pts : 0;
+    const leader = rows[0];
+    const second = rows[1];
     let leaderLine = "";
-    if (leader) {
-      if (gap === 0) leaderLine = `${leader.name} and ${second?.name} are level on points.`;
-      else leaderLine = `${leader.name} is winning by ${gap} point${gap === 1 ? "" : "s"}.`;
+    if (isTrophy) {
+      if (leader) leaderLine = `${leader.name} has the best shot at the title, at ${leader.chance}%.`;
+    } else {
+      const gap = leader && second ? leader.pts - second.pts : 0;
+      if (leader) {
+        if (gap === 0) leaderLine = `${leader.name} and ${second?.name} are level on points.`;
+        else leaderLine = `${leader.name} is winning by ${gap} point${gap === 1 ? "" : "s"}.`;
+      }
     }
 
+    const fileName = isTrophy ? "dingae-sweepstake-trophy-chances.png" : "dingae-sweepstake-table.png";
     canvas.toBlob(async (blob) => {
       if (!blob) return;
-      const file = new File([blob], "dingae-sweepstake-table.png", { type: "image/png" });
+      const file = new File([blob], fileName, { type: "image/png" });
       const shareText = `${leaderLine}\n\nFollow the live table: https://dingaesweepstakewc26.vercel.app`;
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: "Dingae Sweepstake table", text: shareText });
+        await navigator.share({ files: [file], title: isTrophy ? "Trophy chances" : "Dingae Sweepstake table", text: shareText });
         return;
       }
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = "dingae-sweepstake-table.png";
+      link.download = fileName;
       link.click();
       window.open("https://wa.me/?text=" + encodeURIComponent(shareText), "_blank", "noopener,noreferrer");
     }, "image/png");
@@ -1946,7 +1957,6 @@ export default function App() {
       <style>{CSS}</style>
       <header className="hero">
         <div className="herofoot">
-          <div style={{ flex: 1 }} />
           <div className="herosync">
             <span className="syncmsg">
               {syncMsg ||
@@ -2159,7 +2169,13 @@ export default function App() {
         <section className="pane">
           <div className="panehead">
             <h2>League Table</h2>
-            <button className="editdraftbtn" onClick={shareTableImageToWhatsApp}>Share table image</button>
+            <div className="sharerow">
+              <select className="filterselect small" value={shareView} onChange={(e) => setShareView(e.target.value)}>
+                <option value="league">League table</option>
+                <option value="trophy">Trophy chances</option>
+              </select>
+              <button className="editdraftbtn" onClick={() => shareImageToWhatsApp(shareView)}>Share image</button>
+            </div>
           </div>
           <div className="subtle tableintro">Points · GD · alive teams</div>
           <div className="leaguebox groupbox">
@@ -2363,7 +2379,8 @@ const CSS = `
 }
 
 .draftsavemsg{font-size:11px;color:#8BA898;min-height:16px}
-.herofoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px}
+.herofoot{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:6px}
+.sharerow{display:flex;align-items:center;gap:8px}
 .herosync{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .herosync .syncmsg{font-size:11px;color:#9FBFA8;white-space:nowrap}
 .herorefresh{font-size:20px;padding:3px 10px;flex-shrink:0;line-height:1}
