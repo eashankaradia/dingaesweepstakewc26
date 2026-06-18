@@ -267,6 +267,31 @@ function fifaStrengthScore(tid) {
 
 const TEAM_IDS = Object.keys(TEAMS);
 const GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
+
+// WC 2026 predetermined knockout bracket
+// r32: matchId → [homeSlot, awaySlot]  (slot = "1A" / "2B" / "3rd")
+// r16/qf/sf: matchId → [childMatch, childMatch]
+// final: [sf1, sf2]
+const WC26_BRACKET = {
+  r32: {
+    m73: ["2A","2B"],  m74: ["1E","3rd"], m75: ["1F","2C"],  m76: ["1C","2F"],
+    m77: ["1I","3rd"], m78: ["2E","2I"],  m79: ["1A","3rd"], m80: ["1L","3rd"],
+    m81: ["1D","3rd"], m82: ["1G","3rd"], m83: ["2K","2L"],  m84: ["1H","2J"],
+    m85: ["1B","3rd"], m86: ["1J","2H"],  m87: ["1K","3rd"], m88: ["2D","2G"],
+  },
+  r16: {
+    m89: ["m74","m77"], m90: ["m73","m75"], m91: ["m76","m78"], m92: ["m79","m80"],
+    m93: ["m83","m84"], m94: ["m81","m82"], m95: ["m86","m88"], m96: ["m85","m87"],
+  },
+  qf: {
+    m97: ["m89","m90"], m98: ["m93","m94"], m99: ["m91","m92"], m100: ["m95","m96"],
+  },
+  sf: {
+    m101: ["m97","m98"], m102: ["m99","m100"],
+  },
+  final: ["m101","m102"],
+};
+
 const PLAYER_COLORS = [
   "#E8B33B",
   "#6FB8E8",
@@ -1471,48 +1496,108 @@ export default function App() {
     [],
   );
 
-  const KO_ROUNDS = ["Round of 32", "Round of 16", "Quarter-finals", "Semi-finals", "Final"];
-
   const teamRoute = useMemo(() => {
     if (!routeTeam) return [];
-    const teamMatches = state.apiMatches.filter(
-      (m) => m.homeCode === routeTeam || m.awayCode === routeTeam,
-    );
-    const groupMatches = teamMatches.filter(isGroupMatch).sort(
-      (a, b) => new Date(a.date) - new Date(b.date),
-    );
-    const koMatches = teamMatches.filter((m) => !isGroupMatch(m));
+
+    // Helpers ----------------------------------------------------------------
+    const resolveSlot = (slot) => {
+      if (slot === "3rd") return null;
+      const pos = parseInt(slot[0]);
+      const grp = slot[1];
+      return tournamentData.groupTables[grp]?.[pos - 1]?.tid ?? null;
+    };
+
+    const teamsFromR32 = (matchId) =>
+      (WC26_BRACKET.r32[matchId] || []).flatMap((s) => {
+        const t = resolveSlot(s);
+        return t ? [{ code: t, slot: s }] : [{ code: null, slot: s }];
+      });
+
+    const teamsFromR16 = (matchId) =>
+      (WC26_BRACKET.r16[matchId] || []).flatMap((m) => teamsFromR32(m));
+
+    const teamsFromQF = (matchId) =>
+      (WC26_BRACKET.qf[matchId] || []).flatMap((m) => teamsFromR16(m));
+
+    const teamsFromSF = (matchId) =>
+      (WC26_BRACKET.sf[matchId] || []).flatMap((m) => teamsFromQF(m));
+
+    // Group stage ------------------------------------------------------------
+    const groupMatches = state.apiMatches
+      .filter((m) => isGroupMatch(m) && (m.homeCode === routeTeam || m.awayCode === routeTeam))
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     const oppInfo = (m, code) => {
       const isHome = m.homeCode === code;
       const opp = isHome ? m.awayCode : m.homeCode;
-      const oppName = isHome ? nameFor(m.awayCode, m.awayName) : nameFor(m.homeCode, m.homeName);
-      const oppFlag = isHome ? flagForTeam(m.awayCode, m.awayName) : flagForTeam(m.homeCode, m.homeName);
       const oppOwner = ownerOf(opp);
       const teamGoals = isHome ? m.homeGoals : m.awayGoals;
       const oppGoals = isHome ? m.awayGoals : m.homeGoals;
       const result = isFinished(m)
         ? teamGoals > oppGoals ? "W" : teamGoals < oppGoals ? "L" : "D"
         : isLive(m) ? "LIVE" : null;
-      return { opp, oppName, oppFlag, oppOwner, teamGoals, oppGoals, result, date: m.date, status: m.status };
+      return {
+        code: opp, oppName: isHome ? nameFor(m.awayCode, m.awayName) : nameFor(m.homeCode, m.homeName),
+        oppFlag: isHome ? flagForTeam(m.awayCode, m.awayName) : flagForTeam(m.homeCode, m.homeName),
+        oppOwner, teamGoals, oppGoals, result,
+      };
     };
 
-    const stages = [
-      {
-        round: "Group stage",
-        entries: groupMatches.map((m) => oppInfo(m, routeTeam)),
-      },
-      ...KO_ROUNDS.map((round) => {
-        const match = koMatches.find((m) => {
-          const raw = String(m.round || "").toLowerCase();
-          return raw.includes(round.toLowerCase());
-        });
-        if (!match) return { round, tbd: true };
-        return { round, entries: [oppInfo(match, routeTeam)] };
-      }),
-    ];
+    // Projected group position -----------------------------------------------
+    const group = TEAMS[routeTeam]?.[2];
+    const table = tournamentData.groupTables[group] || [];
+    const posIdx = table.findIndex((r) => r.tid === routeTeam);
+    const pos = posIdx + 1;
+    const slot = pos === 1 ? `1${group}` : pos === 2 ? `2${group}` : null;
 
-    return stages;
+    // Build bracket path if slot is determined --------------------------------
+    let r32Match = null, r16Match = null, qfMatch = null, sfMatch = null;
+    if (slot) {
+      r32Match = Object.entries(WC26_BRACKET.r32).find(([, s]) => s.includes(slot))?.[0] ?? null;
+      if (r32Match) r16Match = Object.entries(WC26_BRACKET.r16).find(([, ms]) => ms.includes(r32Match))?.[0] ?? null;
+      if (r16Match) qfMatch = Object.entries(WC26_BRACKET.qf).find(([, ms]) => ms.includes(r16Match))?.[0] ?? null;
+      if (qfMatch) sfMatch = Object.entries(WC26_BRACKET.sf).find(([, ms]) => ms.includes(qfMatch))?.[0] ?? null;
+    }
+
+    // KO matches with real teams (API) ---------------------------------------
+    const koMatchesReal = state.apiMatches.filter(
+      (m) => !isGroupMatch(m) && (m.homeCode === routeTeam || m.awayCode === routeTeam),
+    );
+    const findKoReal = (roundLabel) =>
+      koMatchesReal.find((m) => String(m.round || "").toLowerCase().includes(roundLabel.toLowerCase()));
+
+    // Build opponents for a KO stage -----------------------------------------
+    const koStage = (round, roundKey, getOpponentTeams) => {
+      const real = findKoReal(round);
+      if (real) {
+        const e = oppInfo(real, routeTeam);
+        return { round, entries: [e], real: true };
+      }
+      if (!slot) return { round, noQualify: true };
+      const opponents = getOpponentTeams().filter(Boolean);
+      return {
+        round,
+        potential: [...new Map(opponents.filter(o => o.code).map(o => [o.code, o])).values()],
+        has3rd: opponents.some(o => o.slot === "3rd"),
+      };
+    };
+
+    const r32OppSlots = r32Match ? WC26_BRACKET.r32[r32Match].filter((s) => s !== slot) : [];
+    const r32Potential = r32OppSlots.map((s) => ({ code: resolveSlot(s), slot: s }));
+
+    const r16OppR32 = r16Match ? WC26_BRACKET.r16[r16Match].find((m) => m !== r32Match) : null;
+    const qfOppR16 = qfMatch ? WC26_BRACKET.qf[qfMatch].find((m) => m !== r16Match) : null;
+    const sfOppQF = sfMatch ? WC26_BRACKET.sf[sfMatch].find((m) => m !== qfMatch) : null;
+    const finalOppSF = sfMatch ? WC26_BRACKET.final.find((m) => m !== sfMatch) : null;
+
+    return [
+      { round: "Group stage", entries: groupMatches.map((m) => oppInfo(m, routeTeam)) },
+      koStage("Round of 32", "r32", () => r32Potential),
+      koStage("Round of 16", "r16", () => r16OppR32 ? teamsFromR32(r16OppR32) : []),
+      koStage("Quarter-finals", "qf", () => qfOppR16 ? teamsFromR16(qfOppR16) : []),
+      koStage("Semi-finals", "sf", () => sfOppQF ? teamsFromQF(sfOppQF) : []),
+      koStage("Final", "final", () => finalOppSF ? teamsFromSF(finalOppSF) : []),
+    ];
   }, [routeTeam, state.apiMatches, tournamentData]);
 
   const refreshMinutesLeft = minutesUntil(state.nextRefreshAt);
@@ -2615,38 +2700,54 @@ export default function App() {
             </div>
             <div className="routegrid">
               {teamRoute.map((stage) => {
-                const isEliminated = !stage.tbd && stage.entries?.every(
-                  (e) => e.result === "L"
-                );
+                const isEliminated = stage.entries?.every((e) => e.result === "L");
                 return (
-                  <div
-                    key={stage.round}
-                    className={`routecard ${isEliminated ? "routeelim" : ""}`}
-                  >
+                  <div key={stage.round} className={`routecard ${isEliminated ? "routeelim" : ""}`}>
                     <div className="routeround">{stage.round}</div>
-                    {stage.tbd ? (
-                      <div className="routeopp routetbd">TBD</div>
-                    ) : (
-                      stage.entries.map((e, i) => {
-                        const owner = e.oppOwner;
-                        return (
-                          <div key={i} className="routeopp">
-                            <span className="routeteam">
-                              {e.oppFlag} {e.oppName}
+
+                    {/* Actual played/scheduled match */}
+                    {stage.entries && stage.entries.map((e, i) => {
+                      const owner = e.oppOwner;
+                      return (
+                        <div key={i} className="routeopp">
+                          <span className="routeteam">{e.oppFlag} {e.oppName}</span>
+                          {owner && <span className="routeowner" style={{ color: owner.color }}>{owner.name}</span>}
+                          {e.result && (
+                            <span className={`routeresult ${e.result === "W" ? "routewin" : e.result === "L" ? "routeloss" : e.result === "LIVE" ? "routelive" : "routedraw"}`}>
+                              {e.result === "LIVE" ? "LIVE" : `${e.result} ${e.teamGoals}–${e.oppGoals}`}
                             </span>
-                            {owner && (
-                              <span className="routeowner" style={{ color: owner.color }}>
-                                {owner.name}
-                              </span>
-                            )}
-                            {e.result && (
-                              <span className={`routeresult ${e.result === "W" ? "routewin" : e.result === "L" ? "routeloss" : "routedraw"}`}>
-                                {e.result === "LIVE" ? "LIVE" : `${e.result} ${e.teamGoals}–${e.oppGoals}`}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Bracket projections (not yet played) */}
+                    {stage.potential !== undefined && (
+                      <div className="routepotential">
+                        {stage.has3rd && (
+                          <span className="routepill routepill3rd">Best 3rd</span>
+                        )}
+                        {stage.potential.map((o) => {
+                          const owner = ownerOf(o.code);
+                          return (
+                            <span
+                              key={o.code}
+                              className="routepill"
+                              style={owner ? { borderColor: `${owner.color}66`, color: "#F0EDE2" } : undefined}
+                            >
+                              {flagForTeam(o.code, "")} {nameFor(o.code, o.code)}
+                              {owner && <span style={{ color: owner.color, fontWeight: 800, marginLeft: 3 }}>· {owner.name}</span>}
+                            </span>
+                          );
+                        })}
+                        {!stage.has3rd && stage.potential.length === 0 && (
+                          <span className="routeopp routetbd">TBD</span>
+                        )}
+                      </div>
+                    )}
+
+                    {stage.noQualify && (
+                      <div className="routeopp routetbd">May not qualify</div>
                     )}
                   </div>
                 );
@@ -2899,10 +3000,10 @@ const CSS = `
 .resultsheadright{display:flex;align-items:center;gap:10px}
 .draftsearch{width:100%;margin-bottom:10px}
 .routefinder{margin-top:14px}
-.routegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:10px}
-.routecard{background:#0C1F15;border:1px solid #ffffff14;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.routegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px}
+.routecard{background:#0C1F15;border:1px solid #ffffff14;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:5px}
 .routecard.routeelim{opacity:.45;filter:grayscale(.5)}
-.routeround{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#9FBFA8}
+.routeround{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#9FBFA8;margin-bottom:2px}
 .routeopp{display:flex;flex-direction:column;gap:2px}
 .routeopp.routetbd{color:#5d7a66;font-size:12px;font-style:italic}
 .routeteam{font-size:13px;font-weight:700;color:#F0EDE2}
@@ -2911,6 +3012,10 @@ const CSS = `
 .routewin{background:#31c46b22;color:#31c46b}
 .routeloss{background:#df554822;color:#df5548}
 .routedraw{background:#e8a23b22;color:#e8a23b}
+.routelive{background:#E0635C33;color:#E0635C}
+.routepotential{display:flex;flex-direction:column;gap:4px}
+.routepill{font-size:11.5px;font-weight:600;color:#C8D8CC;background:#10271A;border:1px solid #ffffff18;border-radius:6px;padding:4px 7px;line-height:1.3}
+.routepill3rd{color:#9FBFA8;font-style:italic;border-style:dashed}
 .managerpill{display:inline-flex;align-items:center;justify-content:center;border:1px solid;border-radius:999px;padding:3px 8px;color:#F0EDE2;font-weight:800;font-size:11px;line-height:1.1;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}.managerpill.small{font-size:10px;padding:2px 6px}.managerpill.none{border-color:#5d665e;background:#5d665e22;color:#C8D8CC}.owner .dot,.legenddot{display:none}.match.managerwin{box-shadow:0 0 0 1px #ffffff0d inset}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(90px,1fr) minmax(70px,.9fr) 44px}.trophyrow.compact .trophybar{height:8px;min-width:60px}.trophyrow.compact b{font-size:16px;text-align:right}.dotrow{grid-template-columns:auto 1fr;align-items:center}.dotlabel{min-width:82px}.dotsline{align-items:center}.outcomedot{width:9px;height:9px}.teamstatgrid{grid-template-columns:repeat(auto-fit,minmax(135px,1fr))}.teamstatcard.compact{padding:7px;gap:2px}.teamstatcard.compact b{font-size:12px}.teamstatcard.compact span,.teamstatcard.compact small{font-size:10.5px}.todaybtn.on{background:#E8B33B;color:#0C1F15;border-color:#E8B33B;font-weight:800}.filtercollapse{align-items:stretch}.filtercollapse .clearfilterbtn{min-height:34px}.scoreline{gap:6px}.teamcell{min-width:0}.grpbadge{letter-spacing:.08em}.grow{min-width:0}.grow span{min-width:0;overflow:hidden;text-overflow:ellipsis}.brow span{min-width:0;overflow:hidden;text-overflow:ellipsis}@media(max-width:560px){.pane{padding:12px 10px}.hero{padding:20px 14px 14px}h1{font-size:38px}.panehead{align-items:flex-start}.match,.lockcard,.chartbox,.groupbox,.board{padding:8px;border-radius:9px}.matchmeta{gap:5px}.city{font-size:10.5px}.tname{font-size:12px}.scorebox.readonly{font-size:20px;gap:4px}.brow{grid-template-columns:20px minmax(72px,1fr) 23px 20px 20px 20px 28px 34px 36px;padding:9px 6px;font-size:10.5px}.brow.bhead{font-size:8px}.managerpill{font-size:10px;padding:3px 6px}.managerpill.small{font-size:9.5px}.trophyrow.compact,.trophyrow.trophyhead{grid-template-columns:minmax(82px,1fr) minmax(54px,.8fr) 38px;gap:5px;padding:6px}.trophyrow.compact b{font-size:15px}.dotrow{grid-template-columns:1fr}.dotsline{gap:3px}.outcomedot{width:8px;height:8px}.teamstatgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.mystatcards{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.mystatcard{padding:8px}.mystatcard span{font-size:9px}.mystatcard b{font-size:18px}.filtercollapse{display:grid;grid-template-columns:1fr 1fr;gap:7px}.filtercollapse .clearfilterbtn{width:100%}.filterpanel{gap:6px;padding:8px}.groupsview{grid-template-columns:1fr}.charthead{align-items:flex-start}.calendarpill{font-size:10.5px}}
 
 
