@@ -560,6 +560,7 @@ export default function App() {
   const [fixturesShareDate, setFixturesShareDate] = useState(() => localDateKey(new Date()));
   const [fixturesShareCompact, setFixturesShareCompact] = useState(false);
   const [draftSearch, setDraftSearch] = useState("");
+  const [draftAliveFilter, setDraftAliveFilter] = useState("all");
   const [routeTeam, setRouteTeam] = useState(() => TEAM_IDS[0] || "");
 
   useEffect(() => {
@@ -2495,11 +2496,22 @@ export default function App() {
             onChange={(e) => setDraftSearch(e.target.value)}
             aria-label="Search teams in draft"
           />
+          <div className="filterrow filterrow-status">
+            <button className={`statusbtn ${draftAliveFilter === "all" ? "on" : ""}`} onClick={() => setDraftAliveFilter("all")}>All</button>
+            <button className={`statusbtn ${draftAliveFilter === "alive" ? "on" : ""}`} onClick={() => setDraftAliveFilter("alive")}>Alive</button>
+            <button className={`statusbtn ${draftAliveFilter === "out" ? "on" : ""}`} onClick={() => setDraftAliveFilter("out")}>Knocked out</button>
+          </div>
           {state.players.map((p) => {
             const teamsForPlayer = TEAM_IDS.filter((t) => state.ownership[t] === p.id);
             const q = draftSearch.trim().toLowerCase();
-            const visibleTeams = q ? teamsForPlayer.filter((t) => TEAMS[t][0].toLowerCase().includes(q)) : teamsForPlayer;
-            if (q && visibleTeams.length === 0) return null;
+            const visibleTeams = teamsForPlayer.filter((t) => {
+              if (q && !TEAMS[t][0].toLowerCase().includes(q)) return false;
+              if (draftAliveFilter === "alive" && !tournamentData.alive.has(t)) return false;
+              if (draftAliveFilter === "out" && tournamentData.alive.has(t)) return false;
+              return true;
+            });
+            const hasActiveFilter = q || draftAliveFilter !== "all";
+            if (hasActiveFilter && visibleTeams.length === 0) return null;
             return (
             <div key={p.id} className="lockcard draftmanagercard" style={{ background: `${PLAYER_COLORS[p.id]}18`, borderLeft: `4px solid ${PLAYER_COLORS[p.id]}` }}>
               <div className="lockname">
