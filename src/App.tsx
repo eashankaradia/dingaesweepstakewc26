@@ -266,6 +266,16 @@ function fifaStrengthScore(tid) {
 }
 
 const TEAM_IDS = Object.keys(TEAMS);
+const QUALIFIED_TEAM_IDS = new Set([
+  "MEX", "RSA", "SUI", "CAN", "BIH", "BRA", "MAR", "USA",
+  "AUS", "PAR", "GER", "CIV", "ECU", "NED", "JPN", "SWE",
+  "BEL", "EGY", "ESP", "CPV", "FRA", "NOR", "SEN", "ARG",
+  "AUT", "ALG", "COL", "POR", "COD", "ENG", "CRO", "GHA",
+]);
+const ELIMINATED_TEAM_IDS = new Set([
+  "CZE", "KOR", "QAT", "SCO", "HAI", "TUR", "CUW", "TUN",
+  "NZL", "IRN", "KSA", "URU", "IRQ", "JOR", "UZB", "PAN",
+]);
 const GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 
 // WC 2026 predetermined knockout bracket
@@ -419,6 +429,12 @@ function gdText(value) {
   return value > 0 ? `+${value}` : String(value || 0);
 }
 
+function teamStatusLabel(tid, alive) {
+  if (ELIMINATED_TEAM_IDS.has(tid)) return "Knocked out";
+  if (QUALIFIED_TEAM_IDS.has(tid) && !alive) return "Qualified";
+  return alive ? "Alive" : "Out";
+}
+
 function isFinished(match) {
   return match?.isFinished || ["FT", "AET", "PEN"].includes(match?.status);
 }
@@ -428,6 +444,14 @@ function isLive(match) {
     match?.isLive ||
     ["1H", "HT", "2H", "ET", "P", "LIVE"].includes(match?.status)
   );
+}
+
+function isRemainingFixture(match) {
+  if (!match || isFinished(match)) return false;
+  if (ELIMINATED_TEAM_IDS.has(match.homeCode) || ELIMINATED_TEAM_IDS.has(match.awayCode)) return false;
+  if (isLive(match)) return true;
+  const kickoff = new Date(match.date || 0).getTime();
+  return Number.isFinite(kickoff) && kickoff > Date.now();
 }
 
 function isGroupMatch(match) {
@@ -600,15 +624,15 @@ export default function App() {
 
   const tournamentData = useMemo(() => {
     const teamStats = baseTeamStats();
-    const futureOrLive = new Set();
+    const alive = new Set();
     const knockedOutByKo = new Set();
 
     state.apiMatches.forEach((m) => {
       if (!m.homeCode || !m.awayCode) return;
 
-      if (!isFinished(m)) {
-        if (m.homeCode) futureOrLive.add(m.homeCode);
-        if (m.awayCode) futureOrLive.add(m.awayCode);
+      if (isRemainingFixture(m)) {
+        if (!ELIMINATED_TEAM_IDS.has(m.homeCode)) alive.add(m.homeCode);
+        if (!ELIMINATED_TEAM_IDS.has(m.awayCode)) alive.add(m.awayCode);
         return;
       }
 
@@ -668,26 +692,18 @@ export default function App() {
       }),
     );
 
-    const alive = new Set();
-    GROUPS.forEach((g) => {
-      const rows = groupTables[g];
-      const complete = rows.every((r) => r.gp >= 3);
-      rows.forEach((r, idx) => {
-        if (knockedOutByKo.has(r.tid)) return;
-        if (futureOrLive.has(r.tid)) alive.add(r.tid);
-        else if (!complete) alive.add(r.tid);
-        else if (idx < 3) alive.add(r.tid); // top 2 plus possible best 3rd-place until bracket resolves
-      });
-    });
+    ELIMINATED_TEAM_IDS.forEach((tid) => alive.delete(tid));
 
     return { teamStats, groupTables, alive, knockedOutByKo };
   }, [state.apiMatches, state.ownership, state.players]);
+
+  const isTeamAlive = (tid) => Boolean(tid) && QUALIFIED_TEAM_IDS.has(tid) && !ELIMINATED_TEAM_IDS.has(tid) && tournamentData.alive.has(tid);
 
 
   const countryOddsByTeam = useMemo(() => {
     const remainingOpponents: Record<string, string[]> = {};
     state.apiMatches
-      .filter((m) => m.homeCode && m.awayCode && !isFinished(m))
+      .filter((m) => m.homeCode && m.awayCode && isRemainingFixture(m))
       .forEach((m) => {
         (remainingOpponents[m.homeCode] ||= []).push(m.awayCode);
         (remainingOpponents[m.awayCode] ||= []).push(m.homeCode);
@@ -702,7 +718,7 @@ export default function App() {
 
     const rawRows = TEAM_IDS.map((tid) => {
       const stats = tournamentData.teamStats[tid] || { pts: 0, gd: 0, gf: 0, w: 0, l: 0 };
-      const alive = tournamentData.alive.has(tid);
+      const alive = isTeamAlive(tid);
       return {
         tid,
         rawOdds: rawAdjustedCountryOdds(tid, stats, alive, scheduleEaseForTeam(tid)),
@@ -756,7 +772,7 @@ export default function App() {
           ga: 0,
           gd: 0,
         };
-        if (tournamentData.alive.has(tid)) byId[pid].alive++;
+        if (isTeamAlive(tid)) byId[pid].alive++;
       }
     });
 
@@ -815,7 +831,7 @@ export default function App() {
   const trophyChances = useMemo(() => {
     const N = 2000;
     const remainingMatches = state.apiMatches.filter(
-      (m) => m.homeCode && m.awayCode && !isFinished(m),
+      (m) => m.homeCode && m.awayCode && isRemainingFixture(m),
     );
 
     // Monte Carlo: simulate the rest of the tournament N times and count wins
@@ -854,7 +870,7 @@ export default function App() {
     return board
       .map((p) => {
         const ownedTeams = Object.keys(p.teams || {});
-        const aliveTeams = ownedTeams.filter((tid) => tournamentData.alive.has(tid));
+        const aliveTeams = ownedTeams.filter((tid) => isTeamAlive(tid));
         const aliveRanks = aliveTeams
           .map((tid) => FIFA_RANKINGS[tid] || 211)
           .sort((a, b) => a - b);
@@ -2015,7 +2031,7 @@ export default function App() {
             return (
               <div
                 key={tid}
-                className={`rankingrow ${tournamentData.alive.has(tid) ? "" : "out"}`}
+                className={`rankingrow ${isTeamAlive(tid) ? "" : "out"}`}
                 style={owner ? { borderLeftColor: owner.color, background: `${owner.color}18` } : undefined}
               >
                 <span className="ranknum">{idx + 1}</span>
@@ -2084,7 +2100,7 @@ export default function App() {
                 return (
                   <span
                     key={tid}
-                    className={`heatteam ${tournamentData.alive.has(tid) ? "" : "out"} ${highlighted ? "" : "mutedheat"}`}
+                    className={`heatteam ${isTeamAlive(tid) ? "" : "out"} ${highlighted ? "" : "mutedheat"}`}
                     style={highlighted ? { borderColor: o.color, background: `${o.color}22` } : undefined}
                   >
                     {TEAMS[tid][1]} {TEAMS[tid][0]}
@@ -2162,7 +2178,7 @@ export default function App() {
   const CountryPerformanceTable = () => {
     const rows = TEAM_IDS.map((tid) => {
       const stats = tournamentData.teamStats[tid] || { pts: 0, gd: 0, gf: 0 };
-      const alive = tournamentData.alive.has(tid);
+      const alive = isTeamAlive(tid);
       return {
         tid,
         stats,
@@ -2288,7 +2304,7 @@ export default function App() {
               .sort((a, b) => (countryOddsByTeam[b] || 0) - (countryOddsByTeam[a] || 0) || (FIFA_RANKINGS[a] || 999) - (FIFA_RANKINGS[b] || 999))
               .map((tid) => {
                 const t = tournamentData.teamStats[tid];
-                const alive = tournamentData.alive.has(tid);
+                const alive = isTeamAlive(tid);
                 const odds = countryOddsByTeam[tid] || 0;
                 const baseOdds = baseOddsForTeam(tid);
                 const oddsChange = oddsChangeForTeam(tid);
@@ -2333,7 +2349,7 @@ export default function App() {
                     return { match: m, opp, result: resultClassForTeam(m, tid), label: resultLabelForTeam(m, tid) };
                   });
                 return (
-                  <div key={tid} className={`rankingrow opponentrow ${tournamentData.alive.has(tid) ? "" : "out"}`}>
+                  <div key={tid} className={`rankingrow opponentrow ${isTeamAlive(tid) ? "" : "out"}`}>
                     <span>{TEAMS[tid][1]} {TEAMS[tid][0]}</span>
                     <span className="opponentchips">
                       {opponents.length ? opponents.map((o, i) => (
@@ -2375,7 +2391,7 @@ export default function App() {
             </div>
             {tournamentData.groupTables[g].map((row) => {
               const owner = row.owner;
-              const alive = tournamentData.alive.has(row.tid);
+              const alive = isTeamAlive(row.tid);
               return (
                 <div
                   key={row.tid}
@@ -2396,7 +2412,7 @@ export default function App() {
                   <span>{row.gp}</span>
                   <b>{row.pts}</b>
                   <span>{gdText(row.gd)}</span>
-                  <span className={`qualpill ${alive ? "alive" : "out"}`}>{alive ? "Alive" : "Out"}</span>
+                  <span className={`qualpill ${alive ? "alive" : "out"}`}>{teamStatusLabel(row.tid, alive)}</span>
                 </div>
               );
             })}
@@ -2506,8 +2522,8 @@ export default function App() {
             const q = draftSearch.trim().toLowerCase();
             const visibleTeams = teamsForPlayer.filter((t) => {
               if (q && !TEAMS[t][0].toLowerCase().includes(q)) return false;
-              if (draftAliveFilter === "alive" && !tournamentData.alive.has(t)) return false;
-              if (draftAliveFilter === "out" && tournamentData.alive.has(t)) return false;
+              if (draftAliveFilter === "alive" && !isTeamAlive(t)) return false;
+              if (draftAliveFilter === "out" && isTeamAlive(t)) return false;
               return true;
             });
             const hasActiveFilter = q || draftAliveFilter !== "all";
@@ -2532,7 +2548,7 @@ export default function App() {
                   (t) => (
                     <span
                       key={t}
-                      className={`lockteam ${editingDraft ? "editing" : ""} ${tournamentData.alive.has(t) ? "" : "out"}`}
+                      className={`lockteam ${editingDraft ? "editing" : ""} ${isTeamAlive(t) ? "" : "out"}`}
                     >
                       <span>{TEAMS[t][1]} {TEAMS[t][0]}</span>
                       {editingDraft && (
@@ -2814,7 +2830,7 @@ export default function App() {
                       .map(([tid, t]) => (
                         <div
                           key={tid}
-                          className={`squadrow ${tournamentData.alive.has(tid) ? "" : "out"}`}
+                          className={`squadrow ${isTeamAlive(tid) ? "" : "out"}`}
                         >
                           <span>
                             {TEAMS[tid]?.[1]} {TEAMS[tid]?.[0]}
