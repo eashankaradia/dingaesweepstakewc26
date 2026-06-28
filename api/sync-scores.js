@@ -202,22 +202,22 @@ const GROUP_FIXTURES = [
 ];
 
 const KO_FIXTURES = [
-  ["m73","2026-06-28","Round of 32","Runner-up A","Runner-up B"],
-  ["m74","2026-06-29","Round of 32","Winner E","3rd place"],
-  ["m75","2026-06-29","Round of 32","Winner F","Runner-up C"],
-  ["m76","2026-06-29","Round of 32","Winner C","Runner-up F"],
-  ["m77","2026-06-30","Round of 32","Winner I","3rd place"],
-  ["m78","2026-06-30","Round of 32","Runner-up E","Runner-up I"],
-  ["m79","2026-06-30","Round of 32","Winner A","3rd place"],
-  ["m80","2026-07-01","Round of 32","TBD","TBD"],
-  ["m81","2026-07-01","Round of 32","TBD","TBD"],
-  ["m82","2026-07-01","Round of 32","TBD","TBD"],
-  ["m83","2026-07-02","Round of 32","TBD","TBD"],
-  ["m84","2026-07-02","Round of 32","TBD","TBD"],
-  ["m85","2026-07-02","Round of 32","TBD","TBD"],
-  ["m86","2026-07-03","Round of 32","TBD","TBD"],
-  ["m87","2026-07-03","Round of 32","TBD","TBD"],
-  ["m88","2026-07-03","Round of 32","TBD","TBD"],
+  ["m73","2026-06-28","Round of 32","South Africa","Canada"],
+  ["m74","2026-06-29","Round of 32","Germany","Paraguay"],
+  ["m75","2026-06-29","Round of 32","Netherlands","Morocco"],
+  ["m76","2026-06-29","Round of 32","Brazil","Japan"],
+  ["m77","2026-06-30","Round of 32","France","Sweden"],
+  ["m78","2026-06-30","Round of 32","Ivory Coast","Norway"],
+  ["m79","2026-06-30","Round of 32","Mexico","Ecuador"],
+  ["m80","2026-07-01","Round of 32","England","DR Congo"],
+  ["m81","2026-07-01","Round of 32","United States","Bosnia and Herzegovina"],
+  ["m82","2026-07-01","Round of 32","Belgium","Senegal"],
+  ["m83","2026-07-02","Round of 32","Portugal","Croatia"],
+  ["m84","2026-07-02","Round of 32","Spain","Austria"],
+  ["m85","2026-07-02","Round of 32","Switzerland","Algeria"],
+  ["m86","2026-07-03","Round of 32","Argentina","Cape Verde"],
+  ["m87","2026-07-03","Round of 32","Colombia","Ghana"],
+  ["m88","2026-07-03","Round of 32","Egypt","Australia"],
   ["m89","2026-07-04","Round of 16","TBD","TBD"],
   ["m90","2026-07-04","Round of 16","TBD","TBD"],
   ["m91","2026-07-05","Round of 16","TBD","TBD"],
@@ -282,24 +282,28 @@ function makeBaseFixtures() {
     source: "base",
   }));
 
-  const knockouts = KO_FIXTURES.map(([id, date, round, homeName, awayName]) => ({
-    id,
-    date: date + "T12:00:00Z",
-    status: "NS",
-    round,
-    league: "FIFA World Cup",
-    country: "World",
-    homeName,
-    awayName,
-    homeCode: null,
-    awayCode: null,
-    homeGoals: null,
-    awayGoals: null,
-    isFinished: false,
-    isScheduled: true,
-    isLive: false,
-    source: "base",
-  }));
+  const knockouts = KO_FIXTURES.map(([id, date, round, homeName, awayName]) => {
+    const homeCode = teamCode(homeName) || null;
+    const awayCode = teamCode(awayName) || null;
+    return {
+      id,
+      date: date + "T12:00:00Z",
+      status: "NS",
+      round,
+      league: "FIFA World Cup",
+      country: "World",
+      homeName,
+      awayName,
+      homeCode,
+      awayCode,
+      homeGoals: null,
+      awayGoals: null,
+      isFinished: false,
+      isScheduled: true,
+      isLive: false,
+      source: "base",
+    };
+  });
 
   return [...groups, ...knockouts];
 }
