@@ -2476,18 +2476,6 @@ export default function App() {
 
   // ── Knockout Bracket Tab ─────────────────────────────────────────────────
   const BracketTab = () => {
-    const UNIT = 52;   // px height of one R32 slot
-    const COL_W = 150; // px width of each round column
-    const GAP = 16;    // px gap between columns (for connector lines)
-    const TOTAL_H = UNIT * 16;  // 832px
-    const TOTAL_W = COL_W * 5 + GAP * 4; // 814px
-
-    // Ordered match IDs for each round (top→bottom in bracket tree)
-    const R32_ORDER = ["m74","m77","m73","m75","m83","m84","m81","m82","m76","m78","m79","m80","m86","m88","m85","m87"];
-    const R16_ORDER = ["m89","m90","m93","m94","m91","m92","m95","m96"];
-    const QF_ORDER  = ["m97","m98","m99","m100"];
-    const SF_ORDER  = ["m101","m102"];
-
     const bracketData = useMemo(() => {
       const resolveSlot = (slot) => {
         if (slot === "3rd") return null;
@@ -2508,7 +2496,6 @@ export default function App() {
         const ag = typeof api.awayGoals === "number" ? api.awayGoals : -1;
         if (hg > ag) return api.homeCode;
         if (ag > hg) return api.awayCode;
-        // Penalties (equal fulltime): use knockedOutByKo
         if (tournamentData.knockedOutByKo.has(hc ?? api.homeCode)) return ac ?? api.awayCode;
         if (tournamentData.knockedOutByKo.has(ac ?? api.awayCode)) return hc ?? api.homeCode;
         return null;
@@ -2550,104 +2537,136 @@ export default function App() {
         .sort((a, b) => b.projPts - a.projPts || b.pts - a.pts || b.gd - a.gd || a.name.localeCompare(b.name));
     }, [board, projection]);
 
-    const BCard = ({ mid }) => {
-      const m = bracketData.md[mid];
-      if (!m) return <div className="bcard bcard-empty" />;
-      const { homeCode: hc, awayCode: ac, homeGoals: hg, awayGoals: ag, status, winner } = m;
-      const live = ["LIVE","HT","ET"].includes(status);
-      const hWon = !!winner && winner === hc;
-      const aWon = !!winner && winner === ac;
-      const hOwner = ownerOf(hc);
-      const aOwner = ownerOf(ac);
-      const teamRow = (code, goals, won, lost, owner) => (
-        <div
-          className={`bteam-row${won?" btr-win":lost?" btr-lost":""}${bracketPick===code?" btr-pick":""}`}
-          onClick={() => code && setBracketPick(bracketPick === code ? null : code)}
-          style={owner && !won && !lost ? {borderLeftColor: owner.color} : undefined}
-        >
-          <span className="btr-flag">{code ? flagForTeam(code, null) : "🏳️"}</span>
-          <span className="btr-name">{code ? nameFor(code, code) : "TBD"}</span>
-          {typeof goals === "number" && <span className="btr-score">{goals}</span>}
-          {owner && <span className="btr-owner" style={{color: owner.color}}>{owner.name.split(" ")[0]}</span>}
-        </div>
+    // ── Circular bracket SVG ──────────────────────────────────────────────────
+    const CX = 180, CY = 180;
+    const R_OUTER = 148, R_R16 = 108, R_QF = 72, R_SF = 40;
+    const C_TEAM = 12, C_NODE = 11, C_FINAL = 16;
+
+    // Radial match order: each pair of adjacent positions maps to one R32 match
+    const R32_RADIAL = ["m74","m77","m73","m75","m83","m84","m81","m82","m76","m78","m79","m80","m86","m88","m85","m87"];
+    const R16_RADIAL = ["m89","m90","m93","m94","m91","m92","m95","m96"];
+    const QF_RADIAL  = ["m97","m98","m99","m100"];
+    const SF_RADIAL  = ["m101","m102"];
+
+    // Angle helpers: position 0 starts at top (-90°), goes clockwise
+    const bAng = (posIdx) => (posIdx / 32) * 2 * Math.PI - Math.PI / 2;
+    const midAng = (start, count) => bAng(start + (count - 1) / 2);
+    const pt = (r, a) => [CX + r * Math.cos(a), CY + r * Math.sin(a)];
+
+    const { md, won } = bracketData;
+    const lineStroke = "#243B2D";
+    const linesEl = [];
+    const nodesEl = [];
+
+    // Connection lines (rendered below circles)
+    // R32 pairs → R16 nodes
+    for (let i = 0; i < 16; i++) {
+      const [ax, ay] = pt(R_OUTER, bAng(2 * i));
+      const [bx, by] = pt(R_OUTER, bAng(2 * i + 1));
+      const [rx, ry] = pt(R_R16, midAng(Math.floor(i / 2) * 4, 4));
+      linesEl.push(
+        <line key={`a${i}`} x1={ax} y1={ay} x2={rx} y2={ry} stroke={lineStroke} strokeWidth="1"/>,
+        <line key={`b${i}`} x1={bx} y1={by} x2={rx} y2={ry} stroke={lineStroke} strokeWidth="1"/>
       );
-      return (
-        <div className={`bcard${live?" bcard-live":winner?" bcard-done":""}`}>
-          {teamRow(hc, hg, hWon, aWon, hOwner)}
-          <div className="bcard-div" />
-          {teamRow(ac, ag, aWon, hWon, aOwner)}
-          {live && <div className="bcard-live-badge">LIVE</div>}
-        </div>
+    }
+    // R16 → QF
+    for (let i = 0; i < 8; i++) {
+      const [rx, ry] = pt(R_R16, midAng(i * 4, 4));
+      const [qx, qy] = pt(R_QF, midAng(Math.floor(i / 2) * 8, 8));
+      linesEl.push(<line key={`c${i}`} x1={rx} y1={ry} x2={qx} y2={qy} stroke={lineStroke} strokeWidth="1"/>);
+    }
+    // QF → SF
+    for (let i = 0; i < 4; i++) {
+      const [qx, qy] = pt(R_QF, midAng(i * 8, 8));
+      const [sx, sy] = pt(R_SF, midAng(Math.floor(i / 2) * 16, 16));
+      linesEl.push(<line key={`d${i}`} x1={qx} y1={qy} x2={sx} y2={sy} stroke={lineStroke} strokeWidth="1"/>);
+    }
+    // SF → Final (center)
+    for (let i = 0; i < 2; i++) {
+      const [sx, sy] = pt(R_SF, midAng(i * 16, 16));
+      linesEl.push(<line key={`e${i}`} x1={sx} y1={sy} x2={CX} y2={CY} stroke={lineStroke} strokeWidth="1"/>);
+    }
+
+    // R32 team circles (32 positions around outer ring)
+    for (let i = 0; i < 32; i++) {
+      const [x, y] = pt(R_OUTER, bAng(i));
+      const matchMid = R32_RADIAL[Math.floor(i / 2)];
+      const m = md[matchMid];
+      const tc = i % 2 === 0 ? m?.homeCode : m?.awayCode;
+      const owner = tc ? ownerOf(tc) : null;
+      const flag = tc ? flagForTeam(tc, null) : null;
+      const isLoser = won[matchMid] && won[matchMid] !== tc;
+      const isPick = bracketPick === tc;
+      nodesEl.push(
+        <g key={`t${i}`} onClick={() => tc && setBracketPick(isPick ? null : tc)} style={{cursor: tc ? "pointer" : "default"}}>
+          <circle cx={x} cy={y} r={C_TEAM}
+            fill="#1A2E22"
+            stroke={isPick ? "#E8B33B" : owner ? owner.color : "#334D40"}
+            strokeWidth={isPick || owner ? 2.5 : 1}
+            opacity={isLoser ? 0.3 : 1}
+          />
+          {flag && <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="13" style={{pointerEvents:"none"}} opacity={isLoser ? 0.25 : 1}>{flag}</text>}
+        </g>
+      );
+    }
+
+    // Inner round node helper
+    const drawNode = (key, x, y, mid, r) => {
+      const m = md[mid];
+      const winner = m?.winner;
+      const owner = winner ? ownerOf(winner) : null;
+      const flag = winner ? flagForTeam(winner, null) : null;
+      const isPick = bracketPick === winner;
+      nodesEl.push(
+        <g key={key} onClick={() => winner && setBracketPick(isPick ? null : winner)} style={{cursor: winner ? "pointer" : "default"}}>
+          <circle cx={x} cy={y} r={r}
+            fill="#1A2E22"
+            stroke={isPick ? "#E8B33B" : owner ? owner.color : "#334D40"}
+            strokeWidth={isPick || owner ? 2 : 1}
+          />
+          {flag && <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="11" style={{pointerEvents:"none"}}>{flag}</text>}
+        </g>
       );
     };
 
-    const RoundCol = ({order, slotH}) => (
-      <div style={{display:"flex",flexDirection:"column",width:COL_W,flexShrink:0}}>
-        {order.map(mid => (
-          <div key={mid} style={{height:slotH,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <BCard mid={mid} />
-          </div>
-        ))}
-      </div>
+    for (let i = 0; i < 8; i++) {
+      const [x, y] = pt(R_R16, midAng(i * 4, 4));
+      drawNode(`r${i}`, x, y, R16_RADIAL[i], C_NODE);
+    }
+    for (let i = 0; i < 4; i++) {
+      const [x, y] = pt(R_QF, midAng(i * 8, 8));
+      drawNode(`q${i}`, x, y, QF_RADIAL[i], C_NODE);
+    }
+    for (let i = 0; i < 2; i++) {
+      const [x, y] = pt(R_SF, midAng(i * 16, 16));
+      drawNode(`s${i}`, x, y, SF_RADIAL[i], C_NODE);
+    }
+
+    // Final — center circle
+    const finalM = md["m104"];
+    const finalW = finalM?.winner;
+    const finalOwner = finalW ? ownerOf(finalW) : null;
+    nodesEl.push(
+      <g key="final" onClick={() => finalW && setBracketPick(bracketPick === finalW ? null : finalW)} style={{cursor: finalW ? "pointer" : "default"}}>
+        <circle cx={CX} cy={CY} r={C_FINAL}
+          fill={finalOwner ? `${finalOwner.color}22` : "#1A2E22"}
+          stroke={finalOwner ? finalOwner.color : "#E8B33B"}
+          strokeWidth="2.5"
+        />
+        <text x={CX} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="16" style={{pointerEvents:"none"}}>
+          {finalW ? flagForTeam(finalW, null) : "🏆"}
+        </text>
+      </g>
     );
-
-    // SVG connector lines
-    const connStroke = "#2A4535";
-    const svgLines = [];
-    const addConn = (n, rX, lX, cX, slotH) => {
-      for (let i = 0; i < n / 2; i++) {
-        const y1 = (i*2+0.5)*slotH, y2 = (i*2+1.5)*slotH, mid = (y1+y2)/2;
-        svgLines.push(
-          <line key={`${cX}-${i}a`} x1={rX} y1={y1} x2={cX} y2={y1} stroke={connStroke} strokeWidth="1"/>,
-          <line key={`${cX}-${i}b`} x1={rX} y1={y2} x2={cX} y2={y2} stroke={connStroke} strokeWidth="1"/>,
-          <line key={`${cX}-${i}v`} x1={cX} y1={y1} x2={cX} y2={y2} stroke={connStroke} strokeWidth="1"/>,
-          <line key={`${cX}-${i}h`} x1={cX} y1={mid} x2={lX} y2={mid} stroke={connStroke} strokeWidth="1"/>,
-        );
-      }
-    };
-    // Column right/left edges: R32=0–150, R16=166–316, QF=332–482, SF=498–648, Final=664–814
-    addConn(16, 150, 166, 158, UNIT);
-    addConn(8,  316, 332, 324, UNIT*2);
-    addConn(4,  482, 498, 490, UNIT*4);
-    addConn(2,  648, 664, 656, UNIT*8);
-
-    const roundLabels = ["R32","R16","QF","SF","Final"];
 
     return (
       <section className="pane">
         <div className="panehead"><h2>Knockout Bracket</h2></div>
 
-        <div style={{overflowX:"auto",overflowY:"visible",marginBottom:12}}>
-          {/* Round labels */}
-          <div style={{display:"flex",marginBottom:6,width:TOTAL_W}}>
-            {roundLabels.map((label,i) => (
-              <React.Fragment key={label}>
-                <div style={{width:COL_W,flexShrink:0,textAlign:"center"}}>
-                  <span style={{fontFamily:"'Saira Condensed'",fontSize:10,letterSpacing:".14em",textTransform:"uppercase",color:"#9FBFA8"}}>{label}</span>
-                </div>
-                {i < 4 && <div style={{width:GAP,flexShrink:0}} />}
-              </React.Fragment>
-            ))}
-          </div>
-
-          {/* Bracket */}
-          <div style={{position:"relative",width:TOTAL_W,height:TOTAL_H}}>
-            <svg width={TOTAL_W} height={TOTAL_H} style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:0}}>
-              {svgLines}
-            </svg>
-            <div style={{display:"flex",position:"relative",zIndex:1}}>
-              <RoundCol order={R32_ORDER} slotH={UNIT} />
-              <div style={{width:GAP,flexShrink:0}} />
-              <RoundCol order={R16_ORDER} slotH={UNIT*2} />
-              <div style={{width:GAP,flexShrink:0}} />
-              <RoundCol order={QF_ORDER} slotH={UNIT*4} />
-              <div style={{width:GAP,flexShrink:0}} />
-              <RoundCol order={SF_ORDER} slotH={UNIT*8} />
-              <div style={{width:GAP,flexShrink:0}} />
-              <RoundCol order={["m104"]} slotH={UNIT*16} />
-            </div>
-          </div>
-        </div>
+        <svg viewBox="0 0 360 360" width="100%" style={{maxWidth:400,display:"block",margin:"0 auto 12px"}}>
+          {linesEl}
+          {nodesEl}
+        </svg>
 
         {/* Impact table */}
         <div className="chartbox">
@@ -2656,7 +2675,7 @@ export default function App() {
               <div className="glabel">IMPACT TABLE</div>
               {bracketPick
                 ? <div className="subtle">{flagForTeam(bracketPick,null)} {nameFor(bracketPick,bracketPick)} wins from here → {projection?.owner ? <span style={{color:PLAYER_COLORS[projection.pid]}}>+{projection.addPts} pts for {projection.owner.name}</span> : <span>unowned team</span>}</div>
-                : <div className="subtle">Tap any team in the bracket to see their points impact</div>
+                : <div className="subtle">Tap any team to see their points impact</div>
               }
             </div>
             {bracketPick && <button className="clearfilterbtn" onClick={() => setBracketPick(null)}>Clear</button>}
