@@ -2654,7 +2654,7 @@ export default function App() {
       nodesEl.push(
         <g key={`t${i}`} onClick={() => tc && advanceTeam(tc)} style={{cursor: tc ? "pointer" : "default"}}>
           <circle cx={x} cy={y} r={C_TEAM}
-            fill="#1A2E22"
+            fill={isLoser ? "#101A12" : "#1A2E22"}
             stroke={isPick ? "#E8B33B" : owner ? owner.color : "#334D40"}
             strokeWidth={isPick ? 2.5 : owner ? 2.5 : 1}
             opacity={op}
