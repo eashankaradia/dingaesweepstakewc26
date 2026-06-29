@@ -2476,6 +2476,8 @@ export default function App() {
 
   // ── Knockout Bracket Tab ─────────────────────────────────────────────────
   const BracketTab = () => {
+    const [userPicks, setUserPicks] = useState({});
+
     const bracketData = useMemo(() => {
       const resolveSlot = (slot) => {
         if (slot === "3rd") return null;
@@ -2483,11 +2485,23 @@ export default function App() {
         return tournamentData.groupTables[grp]?.[pos - 1]?.tid ?? null;
       };
       const koMatches = state.apiMatches.filter(m => !isGroupMatch(m) && m.homeCode && m.awayCode);
+      const r32Only = koMatches.filter(m => m.round === "Round of 32");
+
+      // For R32: if one team is unknown (3rd-place slot), search by the known team alone in R32 matches
+      const findApiR32 = (a, b) => {
+        if (!a && !b) return null;
+        if (!a || !b) {
+          const known = a || b;
+          return r32Only.find(m => m.homeCode === known || m.awayCode === known) || null;
+        }
+        return koMatches.find(m =>
+          (m.homeCode === a && m.awayCode === b) || (m.homeCode === b && m.awayCode === a)
+        ) || null;
+      };
       const findApi = (a, b) => {
         if (!a || !b) return null;
         return koMatches.find(m =>
-          (m.homeCode === a && m.awayCode === b) ||
-          (m.homeCode === b && m.awayCode === a)
+          (m.homeCode === a && m.awayCode === b) || (m.homeCode === b && m.awayCode === a)
         ) || null;
       };
       const resolveWinner = (api, hc, ac) => {
@@ -2502,19 +2516,23 @@ export default function App() {
       };
       const md = {};
       const won = {};
-      const build = (mid, hc, ac) => {
-        const api = findApi(hc, ac);
-        const winner = resolveWinner(api, hc, ac);
+      const build = (mid, hc, ac, apiFn) => {
+        const api = apiFn(hc, ac);
+        const actualWinner = resolveWinner(api, hc, ac);
+        const homeCode = api?.homeCode ?? hc;
+        const awayCode = api?.awayCode ?? ac;
+        const pick = userPicks[mid];
+        const winner = actualWinner || (pick && (pick === homeCode || pick === awayCode) ? pick : null);
         if (winner) won[mid] = winner;
-        md[mid] = { homeCode: api?.homeCode ?? hc, awayCode: api?.awayCode ?? ac, homeGoals: api?.homeGoals ?? null, awayGoals: api?.awayGoals ?? null, status: api?.status ?? "NS", winner, date: api?.date };
+        md[mid] = { homeCode, awayCode, homeGoals: api?.homeGoals ?? null, awayGoals: api?.awayGoals ?? null, status: api?.status ?? "NS", winner, isReal: !!actualWinner, date: api?.date };
       };
-      for (const [mid, slots] of Object.entries(WC26_BRACKET.r32)) build(mid, resolveSlot(slots[0]), resolveSlot(slots[1]));
-      for (const [mid, f] of Object.entries(WC26_BRACKET.r16)) build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
-      for (const [mid, f] of Object.entries(WC26_BRACKET.qf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
-      for (const [mid, f] of Object.entries(WC26_BRACKET.sf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
-      build("m104", won[WC26_BRACKET.final[0]] ?? null, won[WC26_BRACKET.final[1]] ?? null);
+      for (const [mid, slots] of Object.entries(WC26_BRACKET.r32)) build(mid, resolveSlot(slots[0]), resolveSlot(slots[1]), findApiR32);
+      for (const [mid, f] of Object.entries(WC26_BRACKET.r16)) build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
+      for (const [mid, f] of Object.entries(WC26_BRACKET.qf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
+      for (const [mid, f] of Object.entries(WC26_BRACKET.sf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
+      build("m104", won[WC26_BRACKET.final[0]] ?? null, won[WC26_BRACKET.final[1]] ?? null, findApi);
       return { md, won };
-    }, [state.apiMatches, tournamentData]);
+    }, [state.apiMatches, tournamentData, userPicks]);
 
     const projection = useMemo(() => {
       if (!bracketPick) return null;
@@ -2523,7 +2541,7 @@ export default function App() {
       let remainingWins = 0;
       for (const mid of allMids) {
         const m = md[mid];
-        if (m && (m.homeCode === bracketPick || m.awayCode === bracketPick) && !m.winner) remainingWins++;
+        if (m && (m.homeCode === bracketPick || m.awayCode === bracketPick) && !m.isReal) remainingWins++;
       }
       const addPts = remainingWins * 3;
       const pid = state.ownership[bracketPick];
@@ -2537,57 +2555,95 @@ export default function App() {
         .sort((a, b) => b.projPts - a.projPts || b.pts - a.pts || b.gd - a.gd || a.name.localeCompare(b.name));
     }, [board, projection]);
 
+    const { md, won } = bracketData;
+
+    // Click on an outer R32 team: set them as winner (or unset if already picked)
+    const pickR32Team = (tc, matchMid) => {
+      const m = md[matchMid];
+      if (!m || m.isReal) { setBracketPick(bracketPick === tc ? null : tc); return; }
+      if (userPicks[matchMid] === tc) {
+        setUserPicks(p => { const n = {...p}; delete n[matchMid]; return n; });
+        setBracketPick(null);
+      } else {
+        setUserPicks(p => ({ ...p, [matchMid]: tc }));
+        setBracketPick(tc);
+      }
+    };
+
+    // Click on an inner node: cycle through available teams (home → away → clear)
+    const cycleNode = (mid) => {
+      const m = md[mid];
+      if (!m) return;
+      if (m.isReal) { if (m.winner) setBracketPick(bracketPick === m.winner ? null : m.winner); return; }
+      const ta = m.homeCode, tb = m.awayCode;
+      if (!ta && !tb) return;
+      const cur = userPicks[mid];
+      if (cur === ta) {
+        if (tb) { setUserPicks(p => ({ ...p, [mid]: tb })); setBracketPick(tb); }
+        else { setUserPicks(p => { const n = {...p}; delete n[mid]; return n; }); setBracketPick(null); }
+      } else if (cur === tb) {
+        setUserPicks(p => { const n = {...p}; delete n[mid]; return n; });
+        setBracketPick(null);
+      } else {
+        if (ta) { setUserPicks(p => ({ ...p, [mid]: ta })); setBracketPick(ta); }
+      }
+    };
+
+    const handleReset = () => { setUserPicks({}); setBracketPick(null); };
+    const hasPicks = Object.keys(userPicks).length > 0;
+
     // ── Circular bracket SVG ──────────────────────────────────────────────────
     const CX = 180, CY = 180;
-    const R_OUTER = 148, R_R16 = 108, R_QF = 72, R_SF = 40;
+    const R_OUTER = 148, R_MID = 127, R_R16 = 107, R_QF = 71, R_SF = 39;
     const C_TEAM = 12, C_NODE = 11, C_FINAL = 16;
 
-    // Radial match order: each pair of adjacent positions maps to one R32 match
     const R32_RADIAL = ["m74","m77","m73","m75","m83","m84","m81","m82","m76","m78","m79","m80","m86","m88","m85","m87"];
     const R16_RADIAL = ["m89","m90","m93","m94","m91","m92","m95","m96"];
     const QF_RADIAL  = ["m97","m98","m99","m100"];
     const SF_RADIAL  = ["m101","m102"];
 
-    // Angle helpers: position 0 starts at top (-90°), goes clockwise
     const bAng = (posIdx) => (posIdx / 32) * 2 * Math.PI - Math.PI / 2;
     const midAng = (start, count) => bAng(start + (count - 1) / 2);
     const pt = (r, a) => [CX + r * Math.cos(a), CY + r * Math.sin(a)];
 
-    const { md, won } = bracketData;
-    const lineStroke = "#243B2D";
+    const pairStroke = "#3D5C47";   // brighter for R32 pair V-lines
+    const interStroke = "#243B2D";  // dimmer for inter-round lines
     const linesEl = [];
     const nodesEl = [];
 
-    // Connection lines (rendered below circles)
-    // R32 pairs → R16 nodes
+    // R32 V-shape lines: each pair meets at R_MID, then one line to R16 node
     for (let i = 0; i < 16; i++) {
       const [ax, ay] = pt(R_OUTER, bAng(2 * i));
       const [bx, by] = pt(R_OUTER, bAng(2 * i + 1));
-      const [rx, ry] = pt(R_R16, midAng(Math.floor(i / 2) * 4, 4));
+      const pairAng = midAng(2 * i, 2);
+      const [mx, my] = pt(R_MID, pairAng);
+      const r16j = Math.floor(i / 2);
+      const [rx, ry] = pt(R_R16, midAng(r16j * 4, 4));
       linesEl.push(
-        <line key={`a${i}`} x1={ax} y1={ay} x2={rx} y2={ry} stroke={lineStroke} strokeWidth="1"/>,
-        <line key={`b${i}`} x1={bx} y1={by} x2={rx} y2={ry} stroke={lineStroke} strokeWidth="1"/>
+        <line key={`pa${i}`} x1={ax} y1={ay} x2={mx} y2={my} stroke={pairStroke} strokeWidth="1.5"/>,
+        <line key={`pb${i}`} x1={bx} y1={by} x2={mx} y2={my} stroke={pairStroke} strokeWidth="1.5"/>,
+        <line key={`pm${i}`} x1={mx} y1={my} x2={rx} y2={ry} stroke={interStroke} strokeWidth="1"/>
       );
     }
     // R16 → QF
     for (let i = 0; i < 8; i++) {
       const [rx, ry] = pt(R_R16, midAng(i * 4, 4));
       const [qx, qy] = pt(R_QF, midAng(Math.floor(i / 2) * 8, 8));
-      linesEl.push(<line key={`c${i}`} x1={rx} y1={ry} x2={qx} y2={qy} stroke={lineStroke} strokeWidth="1"/>);
+      linesEl.push(<line key={`c${i}`} x1={rx} y1={ry} x2={qx} y2={qy} stroke={interStroke} strokeWidth="1"/>);
     }
     // QF → SF
     for (let i = 0; i < 4; i++) {
       const [qx, qy] = pt(R_QF, midAng(i * 8, 8));
       const [sx, sy] = pt(R_SF, midAng(Math.floor(i / 2) * 16, 16));
-      linesEl.push(<line key={`d${i}`} x1={qx} y1={qy} x2={sx} y2={sy} stroke={lineStroke} strokeWidth="1"/>);
+      linesEl.push(<line key={`d${i}`} x1={qx} y1={qy} x2={sx} y2={sy} stroke={interStroke} strokeWidth="1"/>);
     }
-    // SF → Final (center)
+    // SF → Final
     for (let i = 0; i < 2; i++) {
       const [sx, sy] = pt(R_SF, midAng(i * 16, 16));
-      linesEl.push(<line key={`e${i}`} x1={sx} y1={sy} x2={CX} y2={CY} stroke={lineStroke} strokeWidth="1"/>);
+      linesEl.push(<line key={`e${i}`} x1={sx} y1={sy} x2={CX} y2={CY} stroke={interStroke} strokeWidth="1"/>);
     }
 
-    // R32 team circles (32 positions around outer ring)
+    // R32 team circles
     for (let i = 0; i < 32; i++) {
       const [x, y] = pt(R_OUTER, bAng(i));
       const matchMid = R32_RADIAL[Math.floor(i / 2)];
@@ -2595,34 +2651,40 @@ export default function App() {
       const tc = i % 2 === 0 ? m?.homeCode : m?.awayCode;
       const owner = tc ? ownerOf(tc) : null;
       const flag = tc ? flagForTeam(tc, null) : null;
+      const isWinner = won[matchMid] === tc;
       const isLoser = won[matchMid] && won[matchMid] !== tc;
       const isPick = bracketPick === tc;
+      const isUserWin = !m?.isReal && isWinner;
       nodesEl.push(
-        <g key={`t${i}`} onClick={() => tc && setBracketPick(isPick ? null : tc)} style={{cursor: tc ? "pointer" : "default"}}>
+        <g key={`t${i}`} onClick={() => tc && pickR32Team(tc, matchMid)} style={{cursor: tc ? "pointer" : "default"}}>
           <circle cx={x} cy={y} r={C_TEAM}
-            fill="#1A2E22"
+            fill={isLoser ? "#101A12" : "#1A2E22"}
             stroke={isPick ? "#E8B33B" : owner ? owner.color : "#334D40"}
-            strokeWidth={isPick || owner ? 2.5 : 1}
-            opacity={isLoser ? 0.3 : 1}
+            strokeWidth={isPick ? 2.5 : owner ? 2.5 : 1}
+            strokeDasharray={isUserWin && !m?.isReal ? "3 2" : undefined}
+            opacity={isLoser ? 0.28 : 1}
           />
-          {flag && <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="13" style={{pointerEvents:"none"}} opacity={isLoser ? 0.25 : 1}>{flag}</text>}
+          {flag && <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="13" style={{pointerEvents:"none"}} opacity={isLoser ? 0.2 : 1}>{flag}</text>}
         </g>
       );
     }
 
-    // Inner round node helper
+    // Inner node helper (R16, QF, SF)
     const drawNode = (key, x, y, mid, r) => {
       const m = md[mid];
       const winner = m?.winner;
       const owner = winner ? ownerOf(winner) : null;
       const flag = winner ? flagForTeam(winner, null) : null;
       const isPick = bracketPick === winner;
+      const isUserPick = !m?.isReal && !!winner;
+      const canClick = !!m?.homeCode || !!m?.awayCode;
       nodesEl.push(
-        <g key={key} onClick={() => winner && setBracketPick(isPick ? null : winner)} style={{cursor: winner ? "pointer" : "default"}}>
+        <g key={key} onClick={() => cycleNode(mid)} style={{cursor: canClick ? "pointer" : "default"}}>
           <circle cx={x} cy={y} r={r}
             fill="#1A2E22"
             stroke={isPick ? "#E8B33B" : owner ? owner.color : "#334D40"}
-            strokeWidth={isPick || owner ? 2 : 1}
+            strokeWidth={isPick ? 2 : owner ? 2 : 1}
+            strokeDasharray={isUserPick ? "3 2" : undefined}
           />
           {flag && <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="11" style={{pointerEvents:"none"}}>{flag}</text>}
         </g>
@@ -2642,16 +2704,18 @@ export default function App() {
       drawNode(`s${i}`, x, y, SF_RADIAL[i], C_NODE);
     }
 
-    // Final — center circle
+    // Final center
     const finalM = md["m104"];
     const finalW = finalM?.winner;
     const finalOwner = finalW ? ownerOf(finalW) : null;
+    const finalIsUserPick = !finalM?.isReal && !!finalW;
     nodesEl.push(
-      <g key="final" onClick={() => finalW && setBracketPick(bracketPick === finalW ? null : finalW)} style={{cursor: finalW ? "pointer" : "default"}}>
+      <g key="final" onClick={() => cycleNode("m104")} style={{cursor: (finalM?.homeCode || finalM?.awayCode) ? "pointer" : "default"}}>
         <circle cx={CX} cy={CY} r={C_FINAL}
           fill={finalOwner ? `${finalOwner.color}22` : "#1A2E22"}
           stroke={finalOwner ? finalOwner.color : "#E8B33B"}
           strokeWidth="2.5"
+          strokeDasharray={finalIsUserPick ? "4 2" : undefined}
         />
         <text x={CX} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="16" style={{pointerEvents:"none"}}>
           {finalW ? flagForTeam(finalW, null) : "🏆"}
@@ -2661,7 +2725,11 @@ export default function App() {
 
     return (
       <section className="pane">
-        <div className="panehead"><h2>Knockout Bracket</h2></div>
+        <div className="panehead">
+          <h2>Knockout Bracket</h2>
+          {hasPicks && <button className="clearfilterbtn" onClick={handleReset}>Reset</button>}
+        </div>
+        {!hasPicks && <div className="subtle" style={{textAlign:"center",marginBottom:8,fontSize:12}}>Tap a team to advance them · tap inner rings to cycle</div>}
 
         <svg viewBox="0 0 360 360" width="100%" style={{maxWidth:400,display:"block",margin:"0 auto 12px"}}>
           {linesEl}
