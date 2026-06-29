@@ -560,6 +560,7 @@ export default function App() {
   const [state, setState] = useState(blankState);
   const [tab, setTab] = useState("draft");
   const [expanded, setExpanded] = useState(null);
+  const [bracketPick, setBracketPick] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [resultFilter, setResultFilter] = useState("all");
@@ -2473,6 +2474,218 @@ export default function App() {
     setPasswordError("Wrong password");
   };
 
+  // ── Knockout Bracket Tab ─────────────────────────────────────────────────
+  const BracketTab = () => {
+    const UNIT = 52;   // px height of one R32 slot
+    const COL_W = 150; // px width of each round column
+    const GAP = 16;    // px gap between columns (for connector lines)
+    const TOTAL_H = UNIT * 16;  // 832px
+    const TOTAL_W = COL_W * 5 + GAP * 4; // 814px
+
+    // Ordered match IDs for each round (top→bottom in bracket tree)
+    const R32_ORDER = ["m74","m77","m73","m75","m83","m84","m81","m82","m76","m78","m79","m80","m86","m88","m85","m87"];
+    const R16_ORDER = ["m89","m90","m93","m94","m91","m92","m95","m96"];
+    const QF_ORDER  = ["m97","m98","m99","m100"];
+    const SF_ORDER  = ["m101","m102"];
+
+    const bracketData = useMemo(() => {
+      const resolveSlot = (slot) => {
+        if (slot === "3rd") return null;
+        const pos = parseInt(slot[0]), grp = slot[1];
+        return tournamentData.groupTables[grp]?.[pos - 1]?.tid ?? null;
+      };
+      const koMatches = state.apiMatches.filter(m => !isGroupMatch(m) && m.homeCode && m.awayCode);
+      const findApi = (a, b) => {
+        if (!a || !b) return null;
+        return koMatches.find(m =>
+          (m.homeCode === a && m.awayCode === b) ||
+          (m.homeCode === b && m.awayCode === a)
+        ) || null;
+      };
+      const resolveWinner = (api, hc, ac) => {
+        if (!api || !isFinished(api)) return null;
+        const hg = typeof api.homeGoals === "number" ? api.homeGoals : -1;
+        const ag = typeof api.awayGoals === "number" ? api.awayGoals : -1;
+        if (hg > ag) return api.homeCode;
+        if (ag > hg) return api.awayCode;
+        // Penalties (equal fulltime): use knockedOutByKo
+        if (tournamentData.knockedOutByKo.has(hc ?? api.homeCode)) return ac ?? api.awayCode;
+        if (tournamentData.knockedOutByKo.has(ac ?? api.awayCode)) return hc ?? api.homeCode;
+        return null;
+      };
+      const md = {};
+      const won = {};
+      const build = (mid, hc, ac) => {
+        const api = findApi(hc, ac);
+        const winner = resolveWinner(api, hc, ac);
+        if (winner) won[mid] = winner;
+        md[mid] = { homeCode: api?.homeCode ?? hc, awayCode: api?.awayCode ?? ac, homeGoals: api?.homeGoals ?? null, awayGoals: api?.awayGoals ?? null, status: api?.status ?? "NS", winner, date: api?.date };
+      };
+      for (const [mid, slots] of Object.entries(WC26_BRACKET.r32)) build(mid, resolveSlot(slots[0]), resolveSlot(slots[1]));
+      for (const [mid, f] of Object.entries(WC26_BRACKET.r16)) build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
+      for (const [mid, f] of Object.entries(WC26_BRACKET.qf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
+      for (const [mid, f] of Object.entries(WC26_BRACKET.sf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
+      build("m104", won[WC26_BRACKET.final[0]] ?? null, won[WC26_BRACKET.final[1]] ?? null);
+      return { md, won };
+    }, [state.apiMatches, tournamentData]);
+
+    const projection = useMemo(() => {
+      if (!bracketPick) return null;
+      const { md } = bracketData;
+      const allMids = [...Object.keys(WC26_BRACKET.r32),...Object.keys(WC26_BRACKET.r16),...Object.keys(WC26_BRACKET.qf),...Object.keys(WC26_BRACKET.sf),"m104"];
+      let remainingWins = 0;
+      for (const mid of allMids) {
+        const m = md[mid];
+        if (m && (m.homeCode === bracketPick || m.awayCode === bracketPick) && !m.winner) remainingWins++;
+      }
+      const addPts = remainingWins * 3;
+      const pid = state.ownership[bracketPick];
+      return { addPts, remainingWins, pid, owner: pid != null ? state.players.find(p => p.id === pid) : null };
+    }, [bracketPick, bracketData, state.ownership, state.players]);
+
+    const projectedBoard = useMemo(() => {
+      const base = board.map(r => ({ ...r, projPts: r.pts }));
+      if (!projection || projection.pid == null || projection.addPts === 0) return base;
+      return base.map(r => ({ ...r, projPts: r.id === projection.pid ? r.pts + projection.addPts : r.pts }))
+        .sort((a, b) => b.projPts - a.projPts || b.pts - a.pts || b.gd - a.gd || a.name.localeCompare(b.name));
+    }, [board, projection]);
+
+    const BCard = ({ mid }) => {
+      const m = bracketData.md[mid];
+      if (!m) return <div className="bcard bcard-empty" />;
+      const { homeCode: hc, awayCode: ac, homeGoals: hg, awayGoals: ag, status, winner } = m;
+      const live = ["LIVE","HT","ET"].includes(status);
+      const hWon = !!winner && winner === hc;
+      const aWon = !!winner && winner === ac;
+      const hOwner = ownerOf(hc);
+      const aOwner = ownerOf(ac);
+      const teamRow = (code, goals, won, lost, owner) => (
+        <div
+          className={`bteam-row${won?" btr-win":lost?" btr-lost":""}${bracketPick===code?" btr-pick":""}`}
+          onClick={() => code && setBracketPick(bracketPick === code ? null : code)}
+          style={owner && !won && !lost ? {borderLeftColor: owner.color} : undefined}
+        >
+          <span className="btr-flag">{code ? flagForTeam(code, null) : "🏳️"}</span>
+          <span className="btr-name">{code ? nameFor(code, code) : "TBD"}</span>
+          {typeof goals === "number" && <span className="btr-score">{goals}</span>}
+          {owner && <span className="btr-owner" style={{color: owner.color}}>{owner.name.split(" ")[0]}</span>}
+        </div>
+      );
+      return (
+        <div className={`bcard${live?" bcard-live":winner?" bcard-done":""}`}>
+          {teamRow(hc, hg, hWon, aWon, hOwner)}
+          <div className="bcard-div" />
+          {teamRow(ac, ag, aWon, hWon, aOwner)}
+          {live && <div className="bcard-live-badge">LIVE</div>}
+        </div>
+      );
+    };
+
+    const RoundCol = ({order, slotH}) => (
+      <div style={{display:"flex",flexDirection:"column",width:COL_W,flexShrink:0}}>
+        {order.map(mid => (
+          <div key={mid} style={{height:slotH,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <BCard mid={mid} />
+          </div>
+        ))}
+      </div>
+    );
+
+    // SVG connector lines
+    const connStroke = "#2A4535";
+    const svgLines = [];
+    const addConn = (n, rX, lX, cX, slotH) => {
+      for (let i = 0; i < n / 2; i++) {
+        const y1 = (i*2+0.5)*slotH, y2 = (i*2+1.5)*slotH, mid = (y1+y2)/2;
+        svgLines.push(
+          <line key={`${cX}-${i}a`} x1={rX} y1={y1} x2={cX} y2={y1} stroke={connStroke} strokeWidth="1"/>,
+          <line key={`${cX}-${i}b`} x1={rX} y1={y2} x2={cX} y2={y2} stroke={connStroke} strokeWidth="1"/>,
+          <line key={`${cX}-${i}v`} x1={cX} y1={y1} x2={cX} y2={y2} stroke={connStroke} strokeWidth="1"/>,
+          <line key={`${cX}-${i}h`} x1={cX} y1={mid} x2={lX} y2={mid} stroke={connStroke} strokeWidth="1"/>,
+        );
+      }
+    };
+    // Column right/left edges: R32=0–150, R16=166–316, QF=332–482, SF=498–648, Final=664–814
+    addConn(16, 150, 166, 158, UNIT);
+    addConn(8,  316, 332, 324, UNIT*2);
+    addConn(4,  482, 498, 490, UNIT*4);
+    addConn(2,  648, 664, 656, UNIT*8);
+
+    const roundLabels = ["R32","R16","QF","SF","Final"];
+
+    return (
+      <section className="pane">
+        <div className="panehead"><h2>Knockout Bracket</h2></div>
+
+        <div style={{overflowX:"auto",overflowY:"visible",marginBottom:12}}>
+          {/* Round labels */}
+          <div style={{display:"flex",marginBottom:6,width:TOTAL_W}}>
+            {roundLabels.map((label,i) => (
+              <React.Fragment key={label}>
+                <div style={{width:COL_W,flexShrink:0,textAlign:"center"}}>
+                  <span style={{fontFamily:"'Saira Condensed'",fontSize:10,letterSpacing:".14em",textTransform:"uppercase",color:"#9FBFA8"}}>{label}</span>
+                </div>
+                {i < 4 && <div style={{width:GAP,flexShrink:0}} />}
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* Bracket */}
+          <div style={{position:"relative",width:TOTAL_W,height:TOTAL_H}}>
+            <svg width={TOTAL_W} height={TOTAL_H} style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:0}}>
+              {svgLines}
+            </svg>
+            <div style={{display:"flex",position:"relative",zIndex:1}}>
+              <RoundCol order={R32_ORDER} slotH={UNIT} />
+              <div style={{width:GAP,flexShrink:0}} />
+              <RoundCol order={R16_ORDER} slotH={UNIT*2} />
+              <div style={{width:GAP,flexShrink:0}} />
+              <RoundCol order={QF_ORDER} slotH={UNIT*4} />
+              <div style={{width:GAP,flexShrink:0}} />
+              <RoundCol order={SF_ORDER} slotH={UNIT*8} />
+              <div style={{width:GAP,flexShrink:0}} />
+              <RoundCol order={["m104"]} slotH={UNIT*16} />
+            </div>
+          </div>
+        </div>
+
+        {/* Impact table */}
+        <div className="chartbox">
+          <div className="charthead">
+            <div>
+              <div className="glabel">IMPACT TABLE</div>
+              {bracketPick
+                ? <div className="subtle">{flagForTeam(bracketPick,null)} {nameFor(bracketPick,bracketPick)} wins from here → {projection?.owner ? <span style={{color:PLAYER_COLORS[projection.pid]}}>+{projection.addPts} pts for {projection.owner.name}</span> : <span>unowned team</span>}</div>
+                : <div className="subtle">Tap any team in the bracket to see their points impact</div>
+              }
+            </div>
+            {bracketPick && <button className="clearfilterbtn" onClick={() => setBracketPick(null)}>Clear</button>}
+          </div>
+          <div className="btable">
+            <div className="btable-head" style={{gridTemplateColumns: bracketPick ? "26px 1fr 40px 80px" : "26px 1fr 40px"}}>
+              <span>#</span><span>Manager</span><span>Pts</span>{bracketPick && <span>Projected</span>}
+            </div>
+            {(bracketPick ? projectedBoard : board).map((p, i) => (
+              <div key={p.id} className={`btable-row${p.id === projection?.pid ? " btable-row-hi" : ""}`}
+                style={{borderLeftColor:PLAYER_COLORS[p.id],background:`${PLAYER_COLORS[p.id]}18`,gridTemplateColumns: bracketPick ? "26px 1fr 40px 80px" : "26px 1fr 40px"}}>
+                <span>{i+1}</span>
+                <span style={{fontWeight:700}}>{p.name}</span>
+                <span style={{fontFamily:"'Saira Condensed'",fontSize:17,color:"#E8B33B"}}>{p.pts}</span>
+                {bracketPick && (
+                  <span>
+                    <b style={{fontFamily:"'Saira Condensed'",fontSize:17,color:"#F0EDE2"}}>{p.projPts}</b>
+                    {p.id === projection?.pid && projection.addPts > 0 && <em style={{color:"#31c46b",fontSize:10,marginLeft:4,fontStyle:"normal"}}>+{projection.addPts}</em>}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  };
+  // ── end BracketTab ────────────────────────────────────────────────────────
+
   return (
     <div className="app">
       <style>{CSS}</style>
@@ -2860,6 +3073,7 @@ export default function App() {
         </section>
       )}
 
+      {tab === "bracket" && <BracketTab />}
       {tab === "tournament" && <TournamentTab />}
       {tab === "stats" && <StatsTab />}
 
@@ -3004,6 +3218,7 @@ export default function App() {
         {[
           ["draft", "Draft"],
           ["results", "Results"],
+          ["bracket", "Bracket"],
           ["table", "Table"],
           ["tournament", "Tournament"],
           ["stats", "My stats"],
@@ -3135,4 +3350,24 @@ const CSS = `
 .swapnet{font-size:12px;font-weight:900;flex-shrink:0;white-space:nowrap;padding:3px 8px;border-radius:6px}
 .swapnet.pos{color:#6BC17A;background:#6BC17A18}
 .swapnet.zero{color:#8BA898;background:#ffffff08}
+
+/* ── Knockout Bracket ── */
+.bcard{background:#112218;border:1px solid #1f3d2a;border-radius:7px;overflow:hidden;width:148px;transition:border-color .15s}
+.bcard-live{border-color:#E0635C66!important}
+.bcard-empty{width:148px;height:46px;background:#0a1a10;border:1px dashed #1f3d2a;border-radius:7px}
+.bcard-div{height:1px;background:#1f3d2a}
+.bcard-live-badge{background:#E0635C;color:#fff;font-size:7.5px;font-weight:800;text-align:center;letter-spacing:.14em;padding:2px 0;text-transform:uppercase}
+.bteam-row{display:flex;align-items:center;gap:4px;padding:3px 5px;cursor:pointer;border-left:2px solid transparent;transition:background .1s;min-width:0;height:22px}
+.bteam-row:active{background:#1a3020}
+.btr-win{background:#31c46b1c;border-left-color:#31c46b!important}
+.btr-lost{opacity:.4}
+.btr-pick{outline:1.5px solid #E8B33B;outline-offset:-1px;border-radius:3px}
+.btr-flag{font-size:11px;flex-shrink:0;line-height:1}
+.btr-name{flex:1;font-size:10px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#F0EDE2}
+.btr-score{font-family:'Saira Condensed';font-size:14px;font-weight:800;color:#E8B33B;flex-shrink:0;min-width:13px;text-align:right}
+.btr-owner{font-size:8.5px;font-weight:700;flex-shrink:0;max-width:34px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}
+.btable{margin-top:6px}
+.btable-head{display:grid;grid-template-columns:26px 1fr 40px 80px;padding:3px 8px;font-size:9px;color:#9FBFA8;text-transform:uppercase;letter-spacing:.08em}
+.btable-row{display:grid;grid-template-columns:26px 1fr 40px 80px;padding:6px 8px;border-left:3px solid transparent;border-radius:7px;margin-bottom:3px;font-size:12.5px;align-items:center}
+.btable-row-hi{background:#31c46b14!important;border-left-color:#31c46b!important}
 `;
