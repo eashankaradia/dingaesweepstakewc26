@@ -2116,14 +2116,20 @@ export default function App() {
   };
 
   const WorldCupBracket = () => {
+    const STAGE_MAP = {
+      LAST_32: "Round of 32", LAST_16: "Round of 16",
+      QUARTER_FINALS: "Quarter-finals", SEMI_FINALS: "Semi-finals",
+      THIRD_PLACE: "Third place", FINAL: "Final",
+    };
     const knockoutMatches = state.apiMatches
       .filter((m) => !isGroupMatch(m))
+      .filter((m) => m.homeCode || m.awayCode || (m.homeName && m.homeName !== "TBD") || (m.awayName && m.awayName !== "TBD"))
       .slice()
       .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
     const rounds = ["Round of 32", "Round of 16", "Quarter-finals", "Semi-finals", "Third place", "Final"];
     const grouped = Object.fromEntries(rounds.map((r) => [r, []]));
     knockoutMatches.forEach((m) => {
-      const raw = String(m.round || "");
+      const raw = STAGE_MAP[String(m.round || "")] || String(m.round || "");
       const rd = rounds.find((r) => raw.toLowerCase().includes(r.toLowerCase())) || raw || "Knockout";
       grouped[rd] = grouped[rd] || [];
       grouped[rd].push(m);
@@ -2522,8 +2528,8 @@ export default function App() {
             const q = draftSearch.trim().toLowerCase();
             const visibleTeams = teamsForPlayer.filter((t) => {
               if (q && !TEAMS[t][0].toLowerCase().includes(q)) return false;
-              if (draftAliveFilter === "alive" && !isTeamAlive(t)) return false;
-              if (draftAliveFilter === "out" && isTeamAlive(t)) return false;
+              if (draftAliveFilter === "alive" && !tournamentData.alive.has(t)) return false;
+              if (draftAliveFilter === "out" && tournamentData.alive.has(t)) return false;
               return true;
             });
             const hasActiveFilter = q || draftAliveFilter !== "all";

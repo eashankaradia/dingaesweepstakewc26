@@ -308,6 +308,23 @@ function makeBaseFixtures() {
   return [...groups, ...knockouts];
 }
 
+function normalizeRound(stage) {
+  const map = {
+    LAST_32: "Round of 32",
+    LAST_16: "Round of 16",
+    QUARTER_FINALS: "Quarter-finals",
+    SEMI_FINALS: "Semi-finals",
+    THIRD_PLACE: "Third place",
+    FINAL: "Final",
+    GROUP_STAGE: "Group stage",
+    GROUP_A: "Group A", GROUP_B: "Group B", GROUP_C: "Group C",
+    GROUP_D: "Group D", GROUP_E: "Group E", GROUP_F: "Group F",
+    GROUP_G: "Group G", GROUP_H: "Group H", GROUP_I: "Group I",
+    GROUP_J: "Group J", GROUP_K: "Group K", GROUP_L: "Group L",
+  };
+  return map[stage] || stage;
+}
+
 function convertStatus(status) {
   if (status === "FINISHED") return "FT";
   if (status === "IN_PLAY" || status === "LIVE") return "LIVE";
@@ -435,7 +452,7 @@ if (
         id: m.id || key,
         date: m.utcDate || byKey.get(key)?.date || null,
         status,
-        round: m.stage || m.group || byKey.get(key)?.round || "World Cup",
+        round: normalizeRound(m.stage || m.group) || byKey.get(key)?.round || "World Cup",
         league: m.competition?.name || "FIFA World Cup",
         country: "World",
         homeName,
