@@ -572,7 +572,6 @@ export default function App() {
   const [state, setState] = useState(blankState);
   const [tab, setTab] = useState("draft");
   const [expanded, setExpanded] = useState(null);
-  const [bracketPick, setBracketPick] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [resultFilter, setResultFilter] = useState("all");
@@ -2515,28 +2514,8 @@ export default function App() {
 
   // ── Knockout Bracket Tab ─────────────────────────────────────────────────
   const BracketTab = () => {
-    const [userPicks, setUserPicks] = useState({});
-
     const bracketData = useMemo(() => {
-      const resolveSlot = (slot) => {
-        if (slot === "3rd") return null;
-        const pos = parseInt(slot[0]), grp = slot[1];
-        return tournamentData.groupTables[grp]?.[pos - 1]?.tid ?? null;
-      };
       const koMatches = state.apiMatches.filter(m => !isGroupMatch(m) && m.homeCode && m.awayCode);
-      const r32Only = koMatches.filter(m => m.round === "Round of 32");
-
-      // For R32: if one team is unknown (3rd-place slot), search by the known team alone in R32 matches
-      const findApiR32 = (a, b) => {
-        if (!a && !b) return null;
-        if (!a || !b) {
-          const known = a || b;
-          return r32Only.find(m => m.homeCode === known || m.awayCode === known) || null;
-        }
-        return koMatches.find(m =>
-          (m.homeCode === a && m.awayCode === b) || (m.homeCode === b && m.awayCode === a)
-        ) || null;
-      };
       const findApi = (a, b) => {
         if (!a || !b) return null;
         return koMatches.find(m =>
@@ -2557,83 +2536,28 @@ export default function App() {
       };
       const md = {};
       const won = {};
-      const build = (mid, hc, ac, apiFn) => {
-        const api = apiFn(hc, ac);
-        const actualWinner = resolveWinner(api, hc, ac);
+      const build = (mid, hc, ac) => {
+        const api = findApi(hc, ac);
+        const winner = resolveWinner(api, hc, ac);
         const homeCode = api?.homeCode ?? hc;
         const awayCode = api?.awayCode ?? ac;
-        const pick = userPicks[mid];
-        const winner = actualWinner || (pick && (pick === homeCode || pick === awayCode) ? pick : null);
         if (winner) won[mid] = winner;
-        md[mid] = { homeCode, awayCode, homeGoals: api?.homeGoals ?? null, awayGoals: api?.awayGoals ?? null, status: api?.status ?? "NS", winner, isReal: !!actualWinner, date: api?.date };
+        md[mid] = { homeCode, awayCode, winner };
       };
-      for (const [mid, teams] of Object.entries(WC26_BRACKET.r32)) build(mid, teams[0], teams[1], findApi);
-      for (const [mid, f] of Object.entries(WC26_BRACKET.r16)) build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
-      for (const [mid, f] of Object.entries(WC26_BRACKET.qf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
-      for (const [mid, f] of Object.entries(WC26_BRACKET.sf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
-      build("m104", won[WC26_BRACKET.final[0]] ?? null, won[WC26_BRACKET.final[1]] ?? null, findApi);
+      for (const [mid, teams] of Object.entries(WC26_BRACKET.r32)) build(mid, teams[0], teams[1]);
+      for (const [mid, f] of Object.entries(WC26_BRACKET.r16)) build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
+      for (const [mid, f] of Object.entries(WC26_BRACKET.qf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
+      for (const [mid, f] of Object.entries(WC26_BRACKET.sf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null);
+      build("m104", won[WC26_BRACKET.final[0]] ?? null, won[WC26_BRACKET.final[1]] ?? null);
       return { md, won };
-    }, [state.apiMatches, tournamentData, userPicks]);
-
-    const projection = useMemo(() => {
-      if (!bracketPick) return null;
-      const { md } = bracketData;
-      const allMids = [...Object.keys(WC26_BRACKET.r32),...Object.keys(WC26_BRACKET.r16),...Object.keys(WC26_BRACKET.qf),...Object.keys(WC26_BRACKET.sf),"m104"];
-      let remainingWins = 0;
-      for (const mid of allMids) {
-        const m = md[mid];
-        if (m && (m.homeCode === bracketPick || m.awayCode === bracketPick) && !m.isReal) remainingWins++;
-      }
-      const addPts = remainingWins * 3;
-      const pid = state.ownership[bracketPick];
-      return { addPts, remainingWins, pid, owner: pid != null ? state.players.find(p => p.id === pid) : null };
-    }, [bracketPick, bracketData, state.ownership, state.players]);
-
-    const projectedBoard = useMemo(() => {
-      const base = board.map(r => ({ ...r, projPts: r.pts }));
-      if (!projection || projection.pid == null || projection.addPts === 0) return base;
-      return base.map(r => ({ ...r, projPts: r.id === projection.pid ? r.pts + projection.addPts : r.pts }))
-        .sort((a, b) => b.projPts - a.projPts || b.pts - a.pts || b.gd - a.gd || a.name.localeCompare(b.name));
-    }, [board, projection]);
+    }, [state.apiMatches, tournamentData]);
 
     const { md, won } = bracketData;
-
-    // Find which match a team is currently competing in (no winner yet)
-    const findCurrentMatch = (tc) => {
-      if (!tc) return null;
-      const allMids = [...Object.keys(WC26_BRACKET.r32),...Object.keys(WC26_BRACKET.r16),...Object.keys(WC26_BRACKET.qf),...Object.keys(WC26_BRACKET.sf),"m104"];
-      for (const mid of allMids) {
-        const m = md[mid];
-        if (!m || (m.homeCode !== tc && m.awayCode !== tc)) continue;
-        if (!m.winner) return mid;         // active match
-        if (m.winner === tc) continue;     // won — check next round
-        return null;                       // lost
-      }
-      return null;
-    };
-
-    // Advance a team one step: sets userPick for their current match
-    const advanceTeam = (tc) => {
-      if (!tc) return;
-      const mid = findCurrentMatch(tc);
-      setBracketPick(tc);
-      if (!mid) return;
-      const m = md[mid];
-      if (m?.isReal) return; // can't override confirmed result
-      if (userPicks[mid] === tc) {
-        setUserPicks(p => { const n = {...p}; delete n[mid]; return n; });
-      } else {
-        setUserPicks(p => ({ ...p, [mid]: tc }));
-      }
-    };
-
-    const handleReset = () => { setUserPicks({}); setBracketPick(null); };
-    const hasPicks = Object.keys(userPicks).length > 0;
 
     // ── Circular bracket SVG ──────────────────────────────────────────────────
     const CX = 180, CY = 180;
     const R_OUTER = 148, R_MID = 127, R_R16 = 107, R_QF = 71, R_SF = 39;
-    const C_TEAM = 12, C_NODE = 11, C_FINAL = 16;
+    const C_TEAM = 12, C_SLOT = 9;
 
     const R32_RADIAL = ["m74","m77","m73","m75","m83","m84","m81","m82","m76","m78","m79","m80","m86","m88","m85","m87"];
     const R16_RADIAL = ["m89","m90","m93","m94","m91","m92","m95","m96"];
@@ -2643,7 +2567,6 @@ export default function App() {
     const bAng = (posIdx) => (posIdx / 32) * 2 * Math.PI - Math.PI / 2;
     const midAng = (start, count) => bAng(start + (count - 1) / 2);
     const pt = (r, a) => [CX + r * Math.cos(a), CY + r * Math.sin(a)];
-    // Tangential unit vector at angle a (perpendicular to radial, clockwise)
     const tang = (a) => [-Math.sin(a), Math.cos(a)];
 
     const pairStroke = "#3D5C47";
@@ -2651,7 +2574,7 @@ export default function App() {
     const linesEl = [];
     const nodesEl = [];
 
-    // V-shape pair lines
+    // V-shape pair lines (R32 → R16)
     for (let i = 0; i < 16; i++) {
       const [ax, ay] = pt(R_OUTER, bAng(2 * i));
       const [bx, by] = pt(R_OUTER, bAng(2 * i + 1));
@@ -2679,83 +2602,73 @@ export default function App() {
       linesEl.push(<line key={`e${i}`} x1={sx} y1={sy} x2={CX} y2={CY} stroke={interStroke} strokeWidth="1"/>);
     }
 
-    // R32 outer team circles — faded once they've advanced, very faded if eliminated
+    // R32 outer team circles — very faded if eliminated
     for (let i = 0; i < 32; i++) {
       const [x, y] = pt(R_OUTER, bAng(i));
       const matchMid = R32_RADIAL[Math.floor(i / 2)];
       const m = md[matchMid];
       const tc = i % 2 === 0 ? m?.homeCode : m?.awayCode;
       const owner = tc ? ownerOf(tc) : null;
-      const flag = tc ? flagForTeam(tc, null) : null;
       const matchWon = won[matchMid];
-      const isElim = matchWon && matchWon !== tc;
-      const hasAdvanced = matchWon === tc;
-      const isPick = bracketPick === tc;
-      const op = isElim ? 0.18 : hasAdvanced ? 0.4 : 1;
+      const isElim = !!(matchWon && matchWon !== tc);
+      const op = isElim ? 0.18 : 1;
       nodesEl.push(
-        <g key={`t${i}`} onClick={() => tc && advanceTeam(tc)} style={{cursor: tc ? "pointer" : "default"}}>
+        <g key={`t${i}`}>
           <circle cx={x} cy={y} r={C_TEAM}
             fill={isElim ? "#101A12" : "#1A2E22"}
-            stroke={isPick ? "#E8B33B" : owner ? owner.color : "#334D40"}
-            strokeWidth={isPick ? 2.5 : owner ? 2.5 : 1}
+            stroke={owner ? owner.color : "#334D40"}
+            strokeWidth={owner ? 2.5 : 1}
             opacity={op}
           />
-          {flag && <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="13" style={{pointerEvents:"none"}} opacity={op}>{flag}</text>}
+          {tc && <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="13" style={{pointerEvents:"none"}} opacity={op}>{flagForTeam(tc, null)}</text>}
         </g>
       );
     }
 
-    // Inner node: shows winner (solid) or two competitors (split) or one waiting (dashed)
-    const drawNode = (key, x, y, mid, r, ang) => {
+    // Inner match node: two separate circles, one per team, offset tangentially
+    const drawMatchNode = (key, x, y, mid, ang) => {
       const m = md[mid];
-      if (!m) { nodesEl.push(<circle key={key} cx={x} cy={y} r={r} fill="#1A2E22" stroke="#334D40" strokeWidth="1"/>); return; }
-      const ta = m.homeCode, tb = m.awayCode, winner = m.winner;
+      const [tx, ty] = tang(ang);
+      const off = C_SLOT + 3; // gap between circle edges = 2*off - 2*C_SLOT = 6px
 
-      if (winner) {
-        const owner = ownerOf(winner);
-        const isPick = bracketPick === winner;
-        nodesEl.push(
-          <g key={key} onClick={() => advanceTeam(winner)} style={{cursor:"pointer"}}>
-            <circle cx={x} cy={y} r={r} fill="#1A2E22"
-              stroke={isPick ? "#E8B33B" : owner ? owner.color : "#334D40"}
-              strokeWidth={isPick || owner ? 2 : 1}
-              strokeDasharray={!m.isReal ? "3 2" : undefined}
-            />
-            <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="11" style={{pointerEvents:"none"}}>{flagForTeam(winner)}</text>
-          </g>
-        );
-        return;
-      }
-
-      if (ta && tb) {
-        // Both competitors present — split node
-        const [tx, ty] = tang(ang);
-        const off = r * 0.52, mr = r * 0.62;
-        const owA = ownerOf(ta), owB = ownerOf(tb);
+      if (!m) {
         nodesEl.push(
           <g key={key}>
-            <circle cx={x} cy={y} r={r + 2} fill="#1A2E22" stroke="#334D40" strokeWidth="1"/>
-            <g onClick={() => advanceTeam(ta)} style={{cursor:"pointer"}}>
-              <circle cx={x + off*tx} cy={y + off*ty} r={mr} fill="#1A2E22" stroke={owA ? owA.color : "#3D5C47"} strokeWidth={owA ? 2 : 1}/>
-              <text x={x+off*tx} y={y+off*ty} textAnchor="middle" dominantBaseline="central" fontSize="9" style={{pointerEvents:"none"}}>{flagForTeam(ta)}</text>
-            </g>
-            <g onClick={() => advanceTeam(tb)} style={{cursor:"pointer"}}>
-              <circle cx={x - off*tx} cy={y - off*ty} r={mr} fill="#1A2E22" stroke={owB ? owB.color : "#3D5C47"} strokeWidth={owB ? 2 : 1}/>
-              <text x={x-off*tx} y={y-off*ty} textAnchor="middle" dominantBaseline="central" fontSize="9" style={{pointerEvents:"none"}}>{flagForTeam(tb)}</text>
-            </g>
+            <circle cx={x + off*tx} cy={y + off*ty} r={C_SLOT} fill="#1A2E22" stroke="#334D40" strokeWidth="1"/>
+            <circle cx={x - off*tx} cy={y - off*ty} r={C_SLOT} fill="#1A2E22" stroke="#334D40" strokeWidth="1"/>
           </g>
         );
         return;
       }
 
-      const tc = ta || tb;
-      if (!tc) { nodesEl.push(<circle key={key} cx={x} cy={y} r={r} fill="#1A2E22" stroke="#334D40" strokeWidth="1"/>); return; }
-      const owner = ownerOf(tc);
+      const { homeCode: ta, awayCode: tb, winner } = m;
+      const owA = ta ? ownerOf(ta) : null;
+      const owB = tb ? ownerOf(tb) : null;
+      const aLost = !!(winner && winner !== ta);
+      const bLost = !!(winner && winner !== tb);
+
       nodesEl.push(
-        <g key={key} onClick={() => advanceTeam(tc)} style={{cursor:"pointer"}}>
-          <circle cx={x} cy={y} r={r} fill="#1A2E22"
-            stroke={owner ? owner.color : "#3D5C47"} strokeWidth={owner ? 2 : 1} strokeDasharray="3 2"/>
-          <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="10" style={{pointerEvents:"none"}}>{flagForTeam(tc)}</text>
+        <g key={key}>
+          <circle cx={x + off*tx} cy={y + off*ty} r={C_SLOT}
+            fill={aLost ? "#101A12" : "#1A2E22"}
+            stroke={owA ? owA.color : "#334D40"}
+            strokeWidth={owA ? 1.5 : 1}
+            opacity={aLost ? 0.2 : 1}
+          />
+          {ta && <text x={x + off*tx} y={y + off*ty} textAnchor="middle" dominantBaseline="central"
+            fontSize="10" style={{pointerEvents:"none"}} opacity={aLost ? 0.2 : 1}>
+            {flagForTeam(ta, null)}
+          </text>}
+          <circle cx={x - off*tx} cy={y - off*ty} r={C_SLOT}
+            fill={bLost ? "#101A12" : "#1A2E22"}
+            stroke={owB ? owB.color : "#334D40"}
+            strokeWidth={owB ? 1.5 : 1}
+            opacity={bLost ? 0.2 : 1}
+          />
+          {tb && <text x={x - off*tx} y={y - off*ty} textAnchor="middle" dominantBaseline="central"
+            fontSize="10" style={{pointerEvents:"none"}} opacity={bLost ? 0.2 : 1}>
+            {flagForTeam(tb, null)}
+          </text>}
         </g>
       );
     };
@@ -2763,105 +2676,71 @@ export default function App() {
     for (let i = 0; i < 8; i++) {
       const ang = midAng(i * 4, 4);
       const [x, y] = pt(R_R16, ang);
-      drawNode(`r${i}`, x, y, R16_RADIAL[i], C_NODE, ang);
+      drawMatchNode(`r${i}`, x, y, R16_RADIAL[i], ang);
     }
     for (let i = 0; i < 4; i++) {
       const ang = midAng(i * 8, 8);
       const [x, y] = pt(R_QF, ang);
-      drawNode(`q${i}`, x, y, QF_RADIAL[i], C_NODE, ang);
+      drawMatchNode(`q${i}`, x, y, QF_RADIAL[i], ang);
     }
     for (let i = 0; i < 2; i++) {
       const ang = midAng(i * 16, 16);
       const [x, y] = pt(R_SF, ang);
-      drawNode(`s${i}`, x, y, SF_RADIAL[i], C_NODE, ang);
+      drawMatchNode(`s${i}`, x, y, SF_RADIAL[i], ang);
     }
 
-    // Final center node
+    // Final center node — two circles, horizontal offset
     const finalM = md["m104"];
-    const finalW = finalM?.winner;
-    const finalOwner = finalW ? ownerOf(finalW) : null;
     const fta = finalM?.homeCode, ftb = finalM?.awayCode;
-    if (finalW) {
-      nodesEl.push(
-        <g key="final" onClick={() => setBracketPick(bracketPick === finalW ? null : finalW)} style={{cursor:"pointer"}}>
-          <circle cx={CX} cy={CY} r={C_FINAL}
-            fill={finalOwner ? `${finalOwner.color}22` : "#1A2E22"}
-            stroke={finalOwner ? finalOwner.color : "#E8B33B"} strokeWidth="2.5"
-            strokeDasharray={!finalM?.isReal ? "4 2" : undefined}
-          />
-          <text x={CX} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="16" style={{pointerEvents:"none"}}>{flagForTeam(finalW)}</text>
-        </g>
-      );
-    } else if (fta && ftb) {
-      const off = C_FINAL * 0.52, mr = C_FINAL * 0.62;
-      const owA = ownerOf(fta), owB = ownerOf(ftb);
-      nodesEl.push(
-        <g key="final">
-          <circle cx={CX} cy={CY} r={C_FINAL+2} fill="#1A2E22" stroke="#E8B33B" strokeWidth="2"/>
-          <g onClick={() => advanceTeam(fta)} style={{cursor:"pointer"}}>
-            <circle cx={CX-off} cy={CY} r={mr} fill="#1A2E22" stroke={owA ? owA.color : "#E8B33B"} strokeWidth={owA ? 2 : 1.5}/>
-            <text x={CX-off} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="10" style={{pointerEvents:"none"}}>{flagForTeam(fta)}</text>
-          </g>
-          <g onClick={() => advanceTeam(ftb)} style={{cursor:"pointer"}}>
-            <circle cx={CX+off} cy={CY} r={mr} fill="#1A2E22" stroke={owB ? owB.color : "#E8B33B"} strokeWidth={owB ? 2 : 1.5}/>
-            <text x={CX+off} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="10" style={{pointerEvents:"none"}}>{flagForTeam(ftb)}</text>
-          </g>
-        </g>
-      );
-    } else {
-      nodesEl.push(
-        <g key="final">
-          <circle cx={CX} cy={CY} r={C_FINAL} fill="#1A2E22" stroke="#E8B33B" strokeWidth="2"/>
-          <text x={CX} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="16" style={{pointerEvents:"none"}}>🏆</text>
-        </g>
-      );
-    }
+    const finalWinner = finalM?.winner;
+    const fOff = C_SLOT + 4;
+    const owFa = fta ? ownerOf(fta) : null;
+    const owFb = ftb ? ownerOf(ftb) : null;
+    const faLost = !!(finalWinner && finalWinner !== fta);
+    const fbLost = !!(finalWinner && finalWinner !== ftb);
+    nodesEl.push(
+      <g key="final">
+        {(fta || ftb) ? (
+          <>
+            <circle cx={CX - fOff} cy={CY} r={C_SLOT + 1}
+              fill={faLost ? "#101A12" : "#1A2E22"}
+              stroke={owFa ? owFa.color : "#E8B33B"}
+              strokeWidth={owFa ? 2 : 1.5}
+              opacity={faLost ? 0.2 : 1}
+            />
+            {fta && <text x={CX - fOff} y={CY} textAnchor="middle" dominantBaseline="central"
+              fontSize="11" style={{pointerEvents:"none"}} opacity={faLost ? 0.2 : 1}>
+              {flagForTeam(fta, null)}
+            </text>}
+            <circle cx={CX + fOff} cy={CY} r={C_SLOT + 1}
+              fill={fbLost ? "#101A12" : "#1A2E22"}
+              stroke={owFb ? owFb.color : "#E8B33B"}
+              strokeWidth={owFb ? 2 : 1.5}
+              opacity={fbLost ? 0.2 : 1}
+            />
+            {ftb && <text x={CX + fOff} y={CY} textAnchor="middle" dominantBaseline="central"
+              fontSize="11" style={{pointerEvents:"none"}} opacity={fbLost ? 0.2 : 1}>
+              {flagForTeam(ftb, null)}
+            </text>}
+          </>
+        ) : (
+          <>
+            <circle cx={CX} cy={CY} r={C_SLOT + 1} fill="#1A2E22" stroke="#E8B33B" strokeWidth="1.5"/>
+            <text x={CX} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="14" style={{pointerEvents:"none"}}>🏆</text>
+          </>
+        )}
+      </g>
+    );
 
     return (
       <section className="pane">
         <div className="panehead">
           <h2>Knockout Bracket</h2>
-          {hasPicks && <button className="clearfilterbtn" onClick={handleReset}>Reset</button>}
         </div>
-        {!hasPicks && <div className="subtle" style={{textAlign:"center",marginBottom:8,fontSize:12}}>Tap any team to advance them round by round</div>}
-
         <svg viewBox="0 0 360 360" width="100%" style={{maxWidth:400,display:"block",margin:"0 auto 12px"}}>
           {linesEl}
           {nodesEl}
         </svg>
-
-        {/* Impact table */}
-        <div className="chartbox">
-          <div className="charthead">
-            <div>
-              <div className="glabel">IMPACT TABLE</div>
-              {bracketPick
-                ? <div className="subtle">{flagForTeam(bracketPick,null)} {nameFor(bracketPick,bracketPick)} wins from here → {projection?.owner ? <span style={{color:PLAYER_COLORS[projection.pid]}}>+{projection.addPts} pts for {projection.owner.name}</span> : <span>unowned team</span>}</div>
-                : <div className="subtle">Tap any team to see their points impact</div>
-              }
-            </div>
-            {bracketPick && <button className="clearfilterbtn" onClick={() => setBracketPick(null)}>Clear</button>}
-          </div>
-          <div className="btable">
-            <div className="btable-head" style={{gridTemplateColumns: bracketPick ? "26px 1fr 40px 80px" : "26px 1fr 40px"}}>
-              <span>#</span><span>Manager</span><span>Pts</span>{bracketPick && <span>Projected</span>}
-            </div>
-            {(bracketPick ? projectedBoard : board).map((p, i) => (
-              <div key={p.id} className={`btable-row${p.id === projection?.pid ? " btable-row-hi" : ""}`}
-                style={{borderLeftColor:PLAYER_COLORS[p.id],background:`${PLAYER_COLORS[p.id]}18`,gridTemplateColumns: bracketPick ? "26px 1fr 40px 80px" : "26px 1fr 40px"}}>
-                <span>{i+1}</span>
-                <span style={{fontWeight:700}}>{p.name}</span>
-                <span style={{fontFamily:"'Saira Condensed'",fontSize:17,color:"#E8B33B"}}>{p.pts}</span>
-                {bracketPick && (
-                  <span>
-                    <b style={{fontFamily:"'Saira Condensed'",fontSize:17,color:"#F0EDE2"}}>{p.projPts}</b>
-                    {p.id === projection?.pid && projection.addPts > 0 && <em style={{color:"#31c46b",fontSize:10,marginLeft:4,fontStyle:"normal"}}>+{projection.addPts}</em>}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
       </section>
     );
   };
