@@ -413,10 +413,9 @@ function teamPtsSince(teamCode, dateStr, matches) {
     const isHome = m.homeCode === teamCode;
     const isAway = m.awayCode === teamCode;
     if (!isHome && !isAway) continue;
-    const scored = isHome ? m.homeGoals : m.awayGoals;
-    const conceded = isHome ? m.awayGoals : m.homeGoals;
-    if (scored > conceded) pts += 3;
-    else if (scored === conceded) pts += 1;
+    const res = resultFor(m, isHome ? "home" : "away");
+    if (res === "w") pts += 3;
+    else if (res === "d") pts += 1;
   }
   return pts;
 }
@@ -1734,6 +1733,9 @@ export default function App() {
     const statusClass = isFinished(m) ? "done" : isLive(m) ? "live" : "future";
     const hScore = typeof m.homeGoals === "number" ? m.homeGoals : "";
     const aScore = typeof m.awayGoals === "number" ? m.awayGoals : "";
+    const isShootout = m.duration === "PENALTY_SHOOTOUT";
+    const isET = m.duration === "EXTRA_TIME" || isShootout;
+    const hasPens = isShootout && typeof m.penaltyHomeGoals === "number" && typeof m.penaltyAwayGoals === "number";
     const winnerCode = winningTeamCode(m);
     const winnerOwner = winnerCode ? ownerOf(winnerCode) : null;
     const homeOwner = ownerOf(m.homeCode);
@@ -1741,13 +1743,14 @@ export default function App() {
     const homeExp = m.homeCode && m.awayCode ? expectedPointsFromRanks(m.homeCode, m.awayCode).toFixed(1) : "—";
     const awayExp = m.homeCode && m.awayCode ? expectedPointsFromRanks(m.awayCode, m.homeCode).toFixed(1) : "—";
     const channel = matchChannel(m);
+    const statusLabel = isShootout ? "PENS" : isET ? "AET" : (m.status || "NS");
     return (
       <div
         className={`match ${winnerOwner ? "managerwin" : ""}`}
         style={winnerOwner ? { borderColor: winnerOwner.color, background: `${winnerOwner.color}20` } : undefined}
       >
         <div className="matchmeta">
-          <span className={`grpbadge ${statusClass}`}>{m.status || "NS"}</span>
+          <span className={`grpbadge ${statusClass}`}>{statusLabel}</span>
           <span className="city">{matchDisplayRound(m)}</span>
           {m.date && (
             <span className="city">{fmtDateTime(m.date)}</span>
@@ -1765,10 +1768,17 @@ export default function App() {
               <span className="owner none">unmapped: {m.homeName}</span>
             )}
           </div>
-          <div className="scorebox readonly">
-            <span>{hScore}</span>
-            <b>:</b>
-            <span>{aScore}</span>
+          <div className="scorebox readonly" style={{flexDirection:"column",gap:2}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <span>{hScore}</span>
+              <b>:</b>
+              <span>{aScore}</span>
+            </div>
+            {hasPens && (
+              <div style={{fontSize:11,color:"#9FBFA8",letterSpacing:"0.02em"}}>
+                ({m.penaltyHomeGoals}–{m.penaltyAwayGoals} pens)
+              </div>
+            )}
           </div>
           <div className="teamcell r">
             <span className="tname">
@@ -1792,7 +1802,11 @@ export default function App() {
     const awayOwner = ownerOf(m.awayCode);
     const hScore = typeof m.homeGoals === "number" ? m.homeGoals : "–";
     const aScore = typeof m.awayGoals === "number" ? m.awayGoals : "–";
+    const isShootout = m.duration === "PENALTY_SHOOTOUT";
+    const isET = m.duration === "EXTRA_TIME" || isShootout;
+    const hasPens = isShootout && typeof m.penaltyHomeGoals === "number" && typeof m.penaltyAwayGoals === "number";
     const statusClass = isFinished(m) ? "done" : isLive(m) ? "live" : "future";
+    const statusLabel = isShootout ? "PENS" : isET ? "AET" : (m.status || "NS");
     const winnerCode = winningTeamCode(m);
     const winnerOwner = winnerCode ? ownerOf(winnerCode) : null;
     return (
@@ -1800,12 +1814,15 @@ export default function App() {
         className="compactmatch"
         style={winnerOwner ? { borderColor: winnerOwner.color } : undefined}
       >
-        <span className={`grpbadge ${statusClass}`}>{m.status || "NS"}</span>
+        <span className={`grpbadge ${statusClass}`}>{statusLabel}</span>
         <span className="compacthome">
           <span className="compactteam">{homeFlag} {nameFor(m.homeCode, m.homeName)}</span>
           {homeOwner && <span className="compactowner" style={{ color: homeOwner.color }}>{homeOwner.name}</span>}
         </span>
-        <span className="compactscore">{hScore}:{aScore}</span>
+        <span className="compactscore">
+          {hScore}:{aScore}
+          {hasPens && <span style={{fontSize:10,color:"#9FBFA8",display:"block",textAlign:"center"}}>({m.penaltyHomeGoals}–{m.penaltyAwayGoals}p)</span>}
+        </span>
         <span className="compactaway">
           <span className="compactteam">{nameFor(m.awayCode, m.awayName)} {awayFlag}</span>
           {awayOwner && <span className="compactowner" style={{ color: awayOwner.color }}>{awayOwner.name}</span>}
