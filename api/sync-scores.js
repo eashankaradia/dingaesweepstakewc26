@@ -459,6 +459,11 @@ if (
       // "HOME_TEAM", "AWAY_TEAM", "DRAW" — definitive match winner from the API
       const apiWinner = m.score?.winner && m.score.winner !== "DRAW" ? m.score.winner : null;
 
+      const penaltyHomeGoals = typeof m.score?.penalties?.home === "number" ? m.score.penalties.home : null;
+      const penaltyAwayGoals = typeof m.score?.penalties?.away === "number" ? m.score.penalties.away : null;
+      // "HOME_TEAM", "AWAY_TEAM", "DRAW" — definitive match winner from the API
+      const apiWinner = m.score?.winner && m.score.winner !== "DRAW" ? m.score.winner : null;
+
       const merged = {
         id: m.id || key,
         date: m.utcDate || byKey.get(key)?.date || null,
