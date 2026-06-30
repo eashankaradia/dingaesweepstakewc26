@@ -434,19 +434,25 @@ if (
       const key = makePairKey(homeCode, awayCode);
       const status = convertStatus(m.status);
 
-      const homeGoals =
-        typeof m.score?.fullTime?.home === "number"
-          ? m.score.fullTime.home
-          : typeof m.score?.regularTime?.home === "number"
-          ? m.score.regularTime.home
-          : null;
+      const duration = m.score?.duration || null; // "REGULAR", "EXTRA_TIME", "PENALTY_SHOOTOUT"
+      const isShootout = duration === "PENALTY_SHOOTOUT";
+      const isExtraTime = duration === "EXTRA_TIME" || isShootout;
 
-      const awayGoals =
-        typeof m.score?.fullTime?.away === "number"
-          ? m.score.fullTime.away
-          : typeof m.score?.regularTime?.away === "number"
-          ? m.score.regularTime.away
-          : null;
+      // For penalty/ET matches, fullTime in v4 can be combined (goals + pens), so prefer extraTime
+      // which holds the cumulative score after ET (without penalties).
+      const homeGoals = isExtraTime
+        ? (typeof m.score?.extraTime?.home === "number" ? m.score.extraTime.home
+           : typeof m.score?.regularTime?.home === "number" ? m.score.regularTime.home
+           : typeof m.score?.fullTime?.home === "number" ? m.score.fullTime.home : null)
+        : (typeof m.score?.fullTime?.home === "number" ? m.score.fullTime.home
+           : typeof m.score?.regularTime?.home === "number" ? m.score.regularTime.home : null);
+
+      const awayGoals = isExtraTime
+        ? (typeof m.score?.extraTime?.away === "number" ? m.score.extraTime.away
+           : typeof m.score?.regularTime?.away === "number" ? m.score.regularTime.away
+           : typeof m.score?.fullTime?.away === "number" ? m.score.fullTime.away : null)
+        : (typeof m.score?.fullTime?.away === "number" ? m.score.fullTime.away
+           : typeof m.score?.regularTime?.away === "number" ? m.score.regularTime.away : null);
 
       const penaltyHomeGoals = typeof m.score?.penalties?.home === "number" ? m.score.penalties.home : null;
       const penaltyAwayGoals = typeof m.score?.penalties?.away === "number" ? m.score.penalties.away : null;
@@ -469,6 +475,7 @@ if (
         penaltyHomeGoals,
         penaltyAwayGoals,
         apiWinner,
+        duration,
         isFinished: status === "FT" || status === "AET" || status === "PEN",
         isScheduled: status === "NS",
         isLive: ["LIVE", "HT", "ET"].includes(status),
