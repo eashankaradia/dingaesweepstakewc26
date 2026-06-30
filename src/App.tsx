@@ -284,10 +284,10 @@ const GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 // final: [sf1, sf2]
 const WC26_BRACKET = {
   r32: {
-    m73: ["2A","2B"],  m74: ["1E","3rd"], m75: ["1F","2C"],  m76: ["1C","2F"],
-    m77: ["1I","3rd"], m78: ["2E","2I"],  m79: ["1A","3rd"], m80: ["1L","3rd"],
-    m81: ["1D","3rd"], m82: ["1G","3rd"], m83: ["2K","2L"],  m84: ["1H","2J"],
-    m85: ["1B","3rd"], m86: ["1J","2H"],  m87: ["1K","3rd"], m88: ["2D","2G"],
+    m73: ["RSA","CAN"], m74: ["GER","PAR"], m75: ["NED","MAR"], m76: ["BRA","JPN"],
+    m77: ["FRA","SWE"], m78: ["CIV","NOR"], m79: ["MEX","ECU"], m80: ["ENG","COD"],
+    m81: ["USA","BIH"], m82: ["BEL","SEN"], m83: ["POR","CRO"], m84: ["ESP","AUT"],
+    m85: ["SUI","ALG"], m86: ["ARG","CPV"], m87: ["COL","GHA"], m88: ["EGY","AUS"],
   },
   r16: {
     m89: ["m74","m77"], m90: ["m73","m75"], m91: ["m76","m78"], m92: ["m79","m80"],
@@ -520,12 +520,24 @@ function fmtChannel(ch) {
 
 function winningTeamCode(match) {
   if (!isFinished(match)) return null;
+  if (match.apiWinner === "HOME_TEAM") return match.homeCode;
+  if (match.apiWinner === "AWAY_TEAM") return match.awayCode;
   if (typeof match.homeGoals !== "number" || typeof match.awayGoals !== "number") return null;
-  if (match.homeGoals === match.awayGoals) return null;
-  return match.homeGoals > match.awayGoals ? match.homeCode : match.awayCode;
+  if (match.homeGoals !== match.awayGoals)
+    return match.homeGoals > match.awayGoals ? match.homeCode : match.awayCode;
+  if (typeof match.penaltyHomeGoals === "number" && typeof match.penaltyAwayGoals === "number")
+    return match.penaltyHomeGoals > match.penaltyAwayGoals ? match.homeCode : match.awayCode;
+  return null;
 }
 
 function resultFor(match, side) {
+  if (match.apiWinner === "HOME_TEAM") return side === "home" ? "w" : "l";
+  if (match.apiWinner === "AWAY_TEAM") return side === "away" ? "w" : "l";
+  if (typeof match.penaltyHomeGoals === "number" && typeof match.penaltyAwayGoals === "number"
+      && match.homeGoals === match.awayGoals) {
+    const homeWon = match.penaltyHomeGoals > match.penaltyAwayGoals;
+    return side === "home" ? (homeWon ? "w" : "l") : (homeWon ? "l" : "w");
+  }
   if (match.homeGoals === match.awayGoals) return "d";
   if (side === "home") return match.homeGoals > match.awayGoals ? "w" : "l";
   return match.awayGoals > match.homeGoals ? "w" : "l";
@@ -535,8 +547,9 @@ function resultFor(match, side) {
 function resultClassForTeam(match, tid) {
   if (!match || !tid) return "future";
   if (!isFinished(match) || typeof match.homeGoals !== "number" || typeof match.awayGoals !== "number") return "future";
-  if (match.homeGoals === match.awayGoals) return "d";
-  return winningTeamCode(match) === tid ? "w" : "l";
+  const winner = winningTeamCode(match);
+  if (winner) return winner === tid ? "w" : "l";
+  return "d";
 }
 
 function resultLabelForTeam(match, tid) {
@@ -640,6 +653,19 @@ export default function App() {
       if (typeof m.homeGoals !== "number" || typeof m.awayGoals !== "number")
         return;
 
+      if (!isGroupMatch(m)) {
+        // KO match: determine winner (handles ET/penalties) and mark loser as eliminated
+        const winner = winningTeamCode(m);
+        if (winner) {
+          const loser = winner === m.homeCode ? m.awayCode : m.homeCode;
+          knockedOutByKo.add(loser);
+          // KO winner stays alive even while waiting for their next TBD match
+          if (!ELIMINATED_TEAM_IDS.has(winner)) alive.add(winner);
+        }
+        return;
+      }
+
+      // Group stage only: update teamStats
       const h = teamStats[m.homeCode];
       const a = teamStats[m.awayCode];
       if (!h || !a) return;
@@ -666,10 +692,6 @@ export default function App() {
         a.pts += 1;
         h.d++;
         a.d++;
-      }
-
-      if (!isGroupMatch(m) && m.homeGoals !== m.awayGoals) {
-        knockedOutByKo.add(m.homeGoals > m.awayGoals ? m.awayCode : m.homeCode);
       }
     });
 
@@ -2506,12 +2528,14 @@ export default function App() {
       };
       const resolveWinner = (api, hc, ac) => {
         if (!api || !isFinished(api)) return null;
+        if (api.apiWinner === "HOME_TEAM") return api.homeCode ?? hc;
+        if (api.apiWinner === "AWAY_TEAM") return api.awayCode ?? ac;
         const hg = typeof api.homeGoals === "number" ? api.homeGoals : -1;
         const ag = typeof api.awayGoals === "number" ? api.awayGoals : -1;
-        if (hg > ag) return api.homeCode;
-        if (ag > hg) return api.awayCode;
-        if (tournamentData.knockedOutByKo.has(hc ?? api.homeCode)) return ac ?? api.awayCode;
-        if (tournamentData.knockedOutByKo.has(ac ?? api.awayCode)) return hc ?? api.homeCode;
+        if (hg > ag) return api.homeCode ?? hc;
+        if (ag > hg) return api.awayCode ?? ac;
+        if (typeof api.penaltyHomeGoals === "number" && typeof api.penaltyAwayGoals === "number")
+          return api.penaltyHomeGoals > api.penaltyAwayGoals ? (api.homeCode ?? hc) : (api.awayCode ?? ac);
         return null;
       };
       const md = {};
@@ -2526,7 +2550,7 @@ export default function App() {
         if (winner) won[mid] = winner;
         md[mid] = { homeCode, awayCode, homeGoals: api?.homeGoals ?? null, awayGoals: api?.awayGoals ?? null, status: api?.status ?? "NS", winner, isReal: !!actualWinner, date: api?.date };
       };
-      for (const [mid, slots] of Object.entries(WC26_BRACKET.r32)) build(mid, resolveSlot(slots[0]), resolveSlot(slots[1]), findApiR32);
+      for (const [mid, teams] of Object.entries(WC26_BRACKET.r32)) build(mid, teams[0], teams[1], findApi);
       for (const [mid, f] of Object.entries(WC26_BRACKET.r16)) build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
       for (const [mid, f] of Object.entries(WC26_BRACKET.qf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
       for (const [mid, f] of Object.entries(WC26_BRACKET.sf))  build(mid, won[f[0]] ?? null, won[f[1]] ?? null, findApi);
