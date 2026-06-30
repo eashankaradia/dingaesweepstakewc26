@@ -448,6 +448,11 @@ if (
           ? m.score.regularTime.away
           : null;
 
+      const penaltyHomeGoals = typeof m.score?.penalties?.home === "number" ? m.score.penalties.home : null;
+      const penaltyAwayGoals = typeof m.score?.penalties?.away === "number" ? m.score.penalties.away : null;
+      // "HOME_TEAM", "AWAY_TEAM", "DRAW" — definitive match winner from the API
+      const apiWinner = m.score?.winner && m.score.winner !== "DRAW" ? m.score.winner : null;
+
       const merged = {
         id: m.id || key,
         date: m.utcDate || byKey.get(key)?.date || null,
@@ -461,7 +466,10 @@ if (
         awayCode,
         homeGoals,
         awayGoals,
-        isFinished: status === "FT" || status === "PEN",
+        penaltyHomeGoals,
+        penaltyAwayGoals,
+        apiWinner,
+        isFinished: status === "FT" || status === "AET" || status === "PEN",
         isScheduled: status === "NS",
         isLive: ["LIVE", "HT", "ET"].includes(status),
         source: "football-data",
