@@ -849,6 +849,31 @@ export default function App() {
 
   }, [state.players, state.ownership, state.apiMatches, tournamentData.alive]);
 
+  // Per-team stats across ALL matches (group + KO), matching board's resultFor logic
+  const allTeamStats = useMemo(() => {
+    const stats: Record<string, { pts: number; gd: number; gf: number; ga: number }> = {};
+    TEAM_IDS.forEach((tid) => { stats[tid] = { pts: 0, gd: 0, gf: 0, ga: 0 }; });
+    state.apiMatches.forEach((m) => {
+      if (!isFinished(m)) return;
+      if (typeof m.homeGoals !== "number" || typeof m.awayGoals !== "number") return;
+      const hRes = resultFor(m, "home");
+      const aRes = resultFor(m, "away");
+      if (stats[m.homeCode]) {
+        stats[m.homeCode].gf += m.homeGoals;
+        stats[m.homeCode].ga += m.awayGoals;
+        stats[m.homeCode].gd = stats[m.homeCode].gf - stats[m.homeCode].ga;
+        stats[m.homeCode].pts += hRes === "w" ? 3 : hRes === "d" ? 1 : 0;
+      }
+      if (stats[m.awayCode]) {
+        stats[m.awayCode].gf += m.awayGoals;
+        stats[m.awayCode].ga += m.homeGoals;
+        stats[m.awayCode].gd = stats[m.awayCode].gf - stats[m.awayCode].ga;
+        stats[m.awayCode].pts += aRes === "w" ? 3 : aRes === "d" ? 1 : 0;
+      }
+    });
+    return stats;
+  }, [state.apiMatches]);
+
   const trophyChances = useMemo(() => {
     const N = 2000;
     const remainingMatches = state.apiMatches.filter(
@@ -2222,7 +2247,7 @@ export default function App() {
 
   const CountryPerformanceTable = () => {
     const rows = TEAM_IDS.map((tid) => {
-      const stats = tournamentData.teamStats[tid] || { pts: 0, gd: 0, gf: 0 };
+      const stats = allTeamStats[tid] || { pts: 0, gd: 0, gf: 0 };
       const alive = isTeamAlive(tid);
       return {
         tid,
