@@ -489,7 +489,23 @@ if (
         });
         apiMatchesMerged++;
       } else {
-        byKey.set(`football-data-${m.id || key}`, merged);
+        // For KO rounds the base fixture is TBD (no pair key). Find it by round + date.
+        const apiDate = (m.utcDate || "").slice(0, 10);
+        const apiRound = normalizeRound(m.stage || m.group);
+        let tbdKey = null;
+        for (const [k, v] of byKey.entries()) {
+          if (v.source === "base" && !v.homeCode && !v.awayCode &&
+              v.round === apiRound && (v.date || "").slice(0, 10) === apiDate) {
+            tbdKey = k;
+            break;
+          }
+        }
+        if (tbdKey) {
+          byKey.set(tbdKey, { ...byKey.get(tbdKey), ...merged });
+          apiMatchesMerged++;
+        } else {
+          byKey.set(`football-data-${m.id || key}`, merged);
+        }
       }
 
       if (apiMatched.length < 100) {
