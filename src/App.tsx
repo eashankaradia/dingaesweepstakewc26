@@ -714,6 +714,7 @@ export default function App() {
     );
 
     ELIMINATED_TEAM_IDS.forEach((tid) => alive.delete(tid));
+    knockedOutByKo.forEach((tid) => alive.delete(tid));
 
     return { teamStats, groupTables, alive, knockedOutByKo };
   }, [state.apiMatches, state.ownership, state.players]);
