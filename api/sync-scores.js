@@ -2,8 +2,8 @@ let cachedResponse = null;
 let nextRefreshAt = 0;
 const CACHE_MS = 5 * 60 * 1000;
 
-const COMPETITIONS = ["PL", "PD", "BL1", "SA", "FL1", "CL"];
-const SEASON = 2025; // 2025/26 season
+const COMPETITIONS = ["PL", "PD", "BL1", "SA", "FL1", "CL", "EL", "ECL"];
+const SEASON = 2026; // 2026/27 season
 
 // football-data.org full team name → our code
 const TEAM_ALIASES = {
